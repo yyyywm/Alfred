@@ -1,0 +1,7 @@
+# 运行时数据不入库
+data/
+.venv/
+__pycache__/
+*.egg-info/
+.env
+.pytest_cache/

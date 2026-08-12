@@ -1,0 +1,58 @@
+# 私人管家配置
+# 设计原则：换模型 = 改这里，不改代码。记忆写入路径固定强模型，闲聊路径自由切。
+
+# 声明式 provider 配置。type 决定走哪类 SDK：
+#   openai_compat —— 任何 OpenAI 兼容端点（DeepSeek / 通义 / 月之暗面 / Ollama / LiteLLM Proxy…）
+#   anthropic     —— Anthropic 原生
+#   gemini        —— Google 原生
+providers:
+  kimi-for-coding:
+    type: anthropic          # Kimi for Coding 是 Anthropic 兼容端点
+    base_url: https://api.kimi.com/coding
+    env_key: KIMI_API_KEY
+    models: [k3, k2p5, kimi-k2-thinking]
+  deepseek:
+    type: openai_compat
+    base_url: https://api.deepseek.com
+    env_key: DEEPSEEK_API_KEY
+    models: [deepseek-chat, deepseek-reasoner]
+  openai:
+    type: openai_compat
+    base_url: https://api.openai.com/v1
+    env_key: OPENAI_API_KEY
+    models: [gpt-4o, gpt-4o-mini]
+  # anthropic:
+  #   type: anthropic
+  #   env_key: ANTHROPIC_API_KEY
+  #   models: [claude-sonnet-4-5]
+  # ollama:
+  #   type: openai_compat
+  #   base_url: http://localhost:11434/v1
+  #   env_key: ""            # 本地无需 key
+  #   models: [qwen3:14b]
+
+models:
+  # 闲聊/对话路径：可自由切换（chat 中 /model <provider>:<model>）
+  chat: kimi-for-coding:k3
+  # 记忆写入路径（事实抽取、consolidate 复盘）：固定用强模型，质量敏感
+  memory_write: kimi-for-coding:k3
+  # embedding：本地模型，选定后不要换（换 = 全量重建索引）
+  embed:
+    name: Qwen/Qwen3-Embedding-0.6B
+    device: null            # null=自动；可填 cpu / mps / cuda
+
+memory:
+  dir: data/memory          # human.md / persona.md（独立 git 仓库版本化）
+  block_char_limit: 2000    # 每个 core block 的字符上限（最小高信号原则）
+  recall_budget: 10         # 每轮记忆召回硬预算（context rot 实证：宁少勿滥）
+  recency_half_life_days: 30
+
+paths:
+  history_dir: data/history
+  vectordb_dir: data/vectordb
+  skills_dirs:
+    - skills
+    - ~/.config/alfred/skills
+  rules_dirs:
+    - rules
+    - ~/.config/alfred/rules

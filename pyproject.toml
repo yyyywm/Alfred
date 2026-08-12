@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alfred"
+version = "0.1.0"
+description = "私人管家 AI Agent：长期记忆 + 笔记知识库 + 可扩展技能"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic-ai>=0.4",
+    "mem0ai>=0.1",
+    "lancedb>=0.9",
+    "sentence-transformers>=3.0",
+    "typer>=0.12",
+    "rich>=13.7",
+    "prompt-toolkit>=3.0",
+    "pydantic-settings>=2.4",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+    "gitpython>=3.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+alfred = "alfred.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["alfred*"]
