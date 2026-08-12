@@ -217,6 +217,7 @@ Alfred/
 8. **记忆块版本化**：`data/memory/` 是独立 git 仓库，`human`/`persona` 每次修改自动 commit。
 9. **测试不依赖真实 LLM**：所有测试不得调用真实模型 API 或下载 embedding，只测纯逻辑。
 10. **路径相对项目根解析**：配置中的相对路径基于 `PROJECT_ROOT` 解析，`~` 自动展开。
+11. **提交必须为单一逻辑单元**：每次 commit 只能包含一个功能/修复/文档主题，禁止混提；同文件多主题改动应使用 `git add -p` 拆分，提交信息遵循 Conventional Commits。
 
 ## 测试策略
 
@@ -297,14 +298,32 @@ alfred = "alfred.cli:app"
 
 ## 提交规范
 
-项目约定使用 Conventional Commits，按逻辑单元分开提交：
+项目约定使用 Conventional Commits，**每次提交必须是单一逻辑单元**，禁止把无关改动混在同一个 commit 中。
 
-- `feat`: 新功能
-- `fix`: 修复
-- `docs`: 文档
-- `test`: 测试
-- `chore`: 杂项
-- `refactor`: 重构
+具体要求：
+
+1. **单一逻辑单元**：一个 commit 只包含一个功能、修复、文档或测试主题。例如 `feat` 和 `fix` 不能混在同一个 commit 里。
+2. **同文件交织也要拆分**：如果多个逻辑改动落在同一个文件里，应使用 `git add -p` 分多次提交，而不是合并成一个。
+3. **提交信息格式**：`<type>: <简短描述>`，type 从下面选择：
+   - `feat`: 新功能
+   - `fix`: 修复
+   - `docs`: 文档
+   - `test`: 测试
+   - `chore`: 杂项
+   - `refactor`: 重构
+4. **禁止的提交**：`git commit -a` 一把提交多个无关文件、包含未完成的临时改动、或把 bugfix/feature/docs 混在一起。
+
+示例：
+```bash
+# 正确：分开提交
+git add -p alfred/config.py alfred/knowledge/embed.py
+git commit -m "fix: support hf_endpoint to bypass huggingface timeout"
+git add -p alfred/config.py alfred/knowledge/embed.py
+git commit -m "feat: support openai_compat embedding provider"
+
+# 错误：混在一起
+git commit -a -m "update embed"
+```
 
 ## 参考文档
 
