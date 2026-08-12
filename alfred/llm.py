@@ -96,7 +96,7 @@ class ConnectionResult(TypedDict):
 
 
 def check_model_connection(config: Config, model_ref: str, timeout: float = 10.0) -> ConnectionResult:
-    """实际探测模型连通性，返回 ok / latency_ms / error。"""
+    """实际探测 chat 模型连通性，返回 ok / latency_ms / error。"""
     start = time.perf_counter()
     try:
         model = build_model(config, model_ref)
@@ -108,6 +108,31 @@ def check_model_connection(config: Config, model_ref: str, timeout: float = 10.0
             "ping",
             model_settings=ModelSettings(timeout=timeout),
         )
+        return {
+            "ok": True,
+            "latency_ms": round((time.perf_counter() - start) * 1000, 1),
+            "error": None,
+        }
+    except Exception as err:
+        return {
+            "ok": False,
+            "latency_ms": round((time.perf_counter() - start) * 1000, 1),
+            "error": _format_model_error(err),
+        }
+
+
+def check_embed_connection(config: Config, timeout: float = 60.0) -> ConnectionResult:
+    """测试 embedding provider 连接。
+
+    - openai_compat：发一个真实 embedding 请求。
+    - local：尝试加载本地模型并编码一个测试句子（首次可能触发模型下载）。
+    """
+    from .knowledge.embed import _get_embedder
+
+    start = time.perf_counter()
+    try:
+        embedder = _get_embedder(config)
+        embedder.embed_query("test")
         return {
             "ok": True,
             "latency_ms": round((time.perf_counter() - start) * 1000, 1),

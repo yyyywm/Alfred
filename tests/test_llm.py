@@ -4,7 +4,7 @@ import time
 from pydantic_ai import Agent
 
 from alfred.config import Config
-from alfred.llm import check_model_connection, list_models
+from alfred.llm import check_embed_connection, check_model_connection, list_models
 
 
 def test_list_models_key_ready(monkeypatch):
@@ -58,3 +58,30 @@ def test_check_model_connection_fail(monkeypatch):
     assert result["ok"] is False
     assert result["error"] is not None
     assert "401" in result["error"] or "Unauthorized" in result["error"]
+
+
+def test_check_embed_connection_ok(monkeypatch):
+    class FakeEmbedder:
+        def embed_query(self, text: str) -> list[float]:
+            return [0.1, 0.2, 0.3]
+
+    monkeypatch.setattr("alfred.knowledge.embed._get_embedder", lambda _config: FakeEmbedder())
+    cfg = Config()
+    result = check_embed_connection(cfg)
+    assert result["ok"] is True
+    assert result["error"] is None
+    assert isinstance(result["latency_ms"], float)
+    assert result["latency_ms"] >= 0
+
+
+def test_check_embed_connection_fail(monkeypatch):
+    class FakeEmbedder:
+        def embed_query(self, text: str) -> list[float]:
+            raise RuntimeError("embedding API 请求失败: 401 invalid key")
+
+    monkeypatch.setattr("alfred.knowledge.embed._get_embedder", lambda _config: FakeEmbedder())
+    cfg = Config()
+    result = check_embed_connection(cfg)
+    assert result["ok"] is False
+    assert result["error"] is not None
+    assert "401" in result["error"]

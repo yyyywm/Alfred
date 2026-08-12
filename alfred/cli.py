@@ -4,7 +4,7 @@ chat 内斜杠命令：
   /exit 退出  /new 新会话  /model <provider:model> 切换闲聊模型
   /remember <内容> 显式教学（写入 human 块）
   /memory 查看长期记忆  /why 查看上一轮用了哪些记忆
-  /status 检查当前模型连接
+  /status 检查当前模型与 embedding 连接
 """
 
 from __future__ import annotations
@@ -44,8 +44,8 @@ def models(
     model_ref: str | None = typer.Argument(None, help="要测试的 provider:model"),
     all_models: bool = typer.Option(False, "--all", help="测试所有配置的模型"),
 ):
-    """列出配置的 provider 与模型，检查 key 可用性；可测试单个或全部模型连通性。"""
-    from .llm import check_model_connection, list_models
+    """列出配置的 provider 与模型，检查 key 可用性；可测试单个或全部模型与 embedding 连通性。"""
+    from .llm import check_embed_connection, check_model_connection, list_models
 
     config = load_config()
 
@@ -61,6 +61,8 @@ def models(
             console.print(f"  {mark}  {ref}  ({ptype})")
         console.print(f"\n闲聊模型：{config.models.chat}")
         console.print(f"记忆写入模型：{config.models.memory_write}")
+        embed = config.models.embed
+        console.print(f"Embedding：{embed.provider} / {embed.name}")
         return
 
     if all_models and model_ref:
@@ -75,6 +77,12 @@ def models(
             if not result["ok"]:
                 any_failed = True
             _print_connection_result(ref, result)
+        embed_label = f"embedding:{config.models.embed.provider}"
+        with console.status(f"[dim]测试 {embed_label} ...[/dim]"):
+            result = check_embed_connection(config)
+        if not result["ok"]:
+            any_failed = True
+        _print_connection_result(embed_label, result)
         if any_failed:
             raise typer.Exit(1)
         return
@@ -192,24 +200,34 @@ def _show_memory(config) -> None:
 
 
 def _show_status(config) -> None:
-    """在 chat 内显示当前 chat 模型的连接状态。"""
-    from .llm import check_model_connection
+    """在 chat 内显示当前 chat 模型与 embedding 的连接状态。"""
+    from .llm import check_embed_connection, check_model_connection
+
     with console.status(f"[dim]测试 {config.models.chat} ...[/dim]"):
-        result = check_model_connection(config, config.models.chat)
-    if result["ok"]:
-        console.print(Panel(
-            f"当前模型：{config.models.chat}\n"
-            f"[green]✓[/green]  连接正常  {result['latency_ms']:.0f}ms",
-            title="[bold]连接状态[/bold]",
-            border_style="green",
-        ))
-    else:
-        console.print(Panel(
-            f"当前模型：{config.models.chat}\n"
-            f"[red]✗[/red]  {result['error']}",
-            title="[bold]连接状态[/bold]",
-            border_style="red",
-        ))
+        chat_result = check_model_connection(config, config.models.chat)
+
+    embed_label = f"embedding:{config.models.embed.provider}"
+    with console.status(f"[dim]测试 {embed_label} ...[/dim]"):
+        embed_result = check_embed_connection(config)
+
+    chat_line = (
+        f"[green]✓[/green]  连接正常  {chat_result['latency_ms']:.0f}ms"
+        if chat_result["ok"]
+        else f"[red]✗[/red]  {chat_result['error']}"
+    )
+    embed_line = (
+        f"[green]✓[/green]  连接正常  {embed_result['latency_ms']:.0f}ms"
+        if embed_result["ok"]
+        else f"[red]✗[/red]  {embed_result['error']}"
+    )
+    ok = chat_result["ok"] and embed_result["ok"]
+    console.print(Panel(
+        f"当前模型：{config.models.chat}\n"
+        f"  chat   {chat_line}\n"
+        f"  embed  {embed_line}",
+        title="[bold]连接状态[/bold]",
+        border_style="green" if ok else "red",
+    ))
 
 
 @app.command()
