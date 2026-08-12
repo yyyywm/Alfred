@@ -31,6 +31,13 @@ def _confirm(msg: str) -> bool:
     return Confirm.ask("是否允许", default=False)
 
 
+def _print_connection_result(ref: str, result: dict) -> None:
+    if result["ok"]:
+        console.print(f"  [green]✓[/green]  {ref}  {result['latency_ms']}ms")
+    else:
+        console.print(f"  [red]✗[/red]  {ref}  {result['error']}")
+
+
 @app.command()
 def models(
     model_ref: str | None = typer.Argument(None, help="要测试的 provider:model"),
@@ -41,18 +48,29 @@ def models(
 
     config = load_config()
 
+    rows = list_models(config)
+    if not rows:
+        console.print("[red]config.yaml 中没有配置任何 provider。[/red]")
+        raise typer.Exit(1)
+
+    # 默认：列出配置，不调用 API
+    if not all_models and not model_ref:
+        for ref, ptype, ready in rows:
+            mark = "[green]✓[/green]" if ready else "[red]✗ key 未设置[/red]"
+            console.print(f"  {mark}  {ref}  ({ptype})")
+        console.print(f"\n闲聊模型：{config.models.chat}")
+        console.print(f"记忆写入模型：{config.models.memory_write}")
+        return
+
+    if all_models and model_ref:
+        console.print("[red]不能同时指定 model_ref 和 --all。[/red]")
+        raise typer.Exit(1)
+
     if all_models:
-        rows = list_models(config)
-        if not rows:
-            console.print("[red]config.yaml 中没有配置任何 provider。[/red]")
-            raise typer.Exit(1)
         for ref, _ptype, _ready in rows:
             with console.status(f"[dim]测试 {ref} ...[/dim]"):
                 result = check_model_connection(config, ref)
-            if result["ok"]:
-                console.print(f"  [green]✓[/green]  {ref}  {result['latency_ms']}ms")
-            else:
-                console.print(f"  [red]✗[/red]  {ref}  {result['error']}")
+            _print_connection_result(ref, result)
         return
 
     if model_ref:
@@ -63,22 +81,8 @@ def models(
             raise typer.Exit(1)
         with console.status(f"[dim]测试 {model_ref} ...[/dim]"):
             result = check_model_connection(config, model_ref)
-        if result["ok"]:
-            console.print(f"  [green]✓[/green]  {model_ref}  {result['latency_ms']}ms")
-        else:
-            console.print(f"  [red]✗[/red]  {model_ref}  {result['error']}")
+        _print_connection_result(model_ref, result)
         return
-
-    # 默认：列出配置，不调用 API
-    rows = list_models(config)
-    if not rows:
-        console.print("[red]config.yaml 中没有配置任何 provider。[/red]")
-        raise typer.Exit(1)
-    for ref, ptype, ready in rows:
-        mark = "[green]✓[/green]" if ready else "[red]✗ key 未设置[/red]"
-        console.print(f"  {mark}  {ref}  ({ptype})")
-    console.print(f"\n闲聊模型：{config.models.chat}")
-    console.print(f"记忆写入模型：{config.models.memory_write}")
 
 
 @app.command()
