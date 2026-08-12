@@ -34,7 +34,7 @@ def _confirm(msg: str) -> bool:
 
 def _print_connection_result(ref: str, result: dict) -> None:
     if result["ok"]:
-        console.print(f"  [green]✓[/green]  {ref}  {result['latency_ms']}ms")
+        console.print(f"  [green]✓[/green]  {ref}  {result['latency_ms']:.0f}ms")
     else:
         console.print(f"  [red]✗[/red]  {ref}  {result['error']}")
 
@@ -68,10 +68,15 @@ def models(
         raise typer.Exit(1)
 
     if all_models:
+        any_failed = False
         for ref, _ptype, _ready in rows:
             with console.status(f"[dim]测试 {ref} ...[/dim]"):
                 result = check_model_connection(config, ref)
+            if not result["ok"]:
+                any_failed = True
             _print_connection_result(ref, result)
+        if any_failed:
+            raise typer.Exit(1)
         return
 
     if model_ref:
@@ -83,6 +88,8 @@ def models(
         with console.status(f"[dim]测试 {model_ref} ...[/dim]"):
             result = check_model_connection(config, model_ref)
         _print_connection_result(model_ref, result)
+        if not result["ok"]:
+            raise typer.Exit(1)
         return
 
 

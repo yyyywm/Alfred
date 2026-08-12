@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import time
+from typing import TypedDict
 
 from pydantic_ai import Agent
 from pydantic_ai.models.anthropic import AnthropicModel
@@ -69,6 +70,10 @@ def list_models(config: Config) -> list[tuple[str, str, bool]]:
 
 def _format_model_error(err: Exception) -> str:
     """把模型调用异常映射为中文友好的提示。"""
+    if isinstance(err, KeyError):
+        return f"配置或环境变量缺失：{err}"
+    if isinstance(err, ValueError):
+        return f"配置错误：{err}"
     text = str(err)
     msg = text.lower()
     if "401" in text or "unauthorized" in msg or "authentication" in msg:
@@ -84,7 +89,13 @@ def _format_model_error(err: Exception) -> str:
     return f"{type(err).__name__}: {err}"
 
 
-def check_model_connection(config: Config, model_ref: str, timeout: float = 10.0) -> dict:
+class ConnectionResult(TypedDict):
+    ok: bool
+    latency_ms: float
+    error: str | None
+
+
+def check_model_connection(config: Config, model_ref: str, timeout: float = 10.0) -> ConnectionResult:
     """实际探测模型连通性，返回 ok / latency_ms / error。"""
     start = time.perf_counter()
     try:
