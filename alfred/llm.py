@@ -69,8 +69,8 @@ def list_models(config: Config) -> list[tuple[str, str, bool]]:
 
 def _format_model_error(err: Exception) -> str:
     """把模型调用异常映射为中文友好的提示。"""
-    msg = str(err).lower()
     text = str(err)
+    msg = text.lower()
     if "401" in text or "unauthorized" in msg or "authentication" in msg:
         return f"401 Unauthorized - API key 无效或缺失（{err}）"
     if "403" in text or "forbidden" in msg:
@@ -84,14 +84,13 @@ def _format_model_error(err: Exception) -> str:
     return f"{type(err).__name__}: {err}"
 
 
-def test_model_connection(config: Config, model_ref: str, timeout: float = 10.0) -> dict:
+def check_model_connection(config: Config, model_ref: str, timeout: float = 10.0) -> dict:
     """实际探测模型连通性，返回 ok / latency_ms / error。"""
     start = time.perf_counter()
     try:
         model = build_model(config, model_ref)
         agent = Agent(
             model,
-            output_type=str,
             system_prompt="Reply with only the word OK.",
         )
         agent.run_sync(
@@ -109,7 +108,3 @@ def test_model_connection(config: Config, model_ref: str, timeout: float = 10.0)
             "latency_ms": round((time.perf_counter() - start) * 1000, 1),
             "error": _format_model_error(err),
         }
-
-
-# 函数名以 test_ 开头，但在业务模块中不是 pytest 用例
-test_model_connection.__test__ = False  # type: ignore[attr-defined]
