@@ -4,6 +4,7 @@ chat 内斜杠命令：
   /exit 退出  /new 新会话  /model <provider:model> 切换闲聊模型
   /remember <内容> 显式教学（写入 human 块）
   /memory 查看长期记忆  /why 查看上一轮用了哪些记忆
+  /status 检查当前模型连接
 """
 
 from __future__ import annotations
@@ -141,6 +142,24 @@ def chat(session_id: str = typer.Option(None, "--session", "-s", help="恢复指
                                         title="上一轮回答依据的记忆"))
                 else:
                     console.print("[dim]上一轮没有使用长期记忆。[/dim]")
+            elif cmd == "/status":
+                from .llm import check_model_connection
+                with console.status(f"[dim]测试 {config.models.chat} ...[/dim]"):
+                    result = check_model_connection(config, config.models.chat)
+                if result["ok"]:
+                    console.print(Panel(
+                        f"当前模型：{config.models.chat}\n"
+                        f"[green]✓[/green]  连接正常  {result['latency_ms']:.0f}ms",
+                        title="连接状态",
+                        border_style="green",
+                    ))
+                else:
+                    console.print(Panel(
+                        f"当前模型：{config.models.chat}\n"
+                        f"[red]✗[/red]  {result['error']}",
+                        title="连接状态",
+                        border_style="red",
+                    ))
             elif cmd == "/sessions":
                 for sid, mtime, n in list_sessions(config)[:10]:
                     from datetime import datetime
