@@ -154,7 +154,7 @@ Alfred/
 - `providers.<name>`：声明式 provider，含 `type`（`openai_compat` / `anthropic` / `gemini`）、`base_url`、`env_key`、可用 `models`
 - `models.chat`：闲聊模型，对话中可用 `/model provider:model` 自由切换
 - `models.memory_write`：记忆写入/复盘模型，固定强模型，质量敏感
-- `models.embed`：本地 embedding 模型，选定后不要换（换 = 全量重建索引）
+- `models.embed`：embedding 模型配置。`provider: local`（默认，本地 sentence-transformers）或 `provider: openai_compat`（云端 embedding API）。支持 `hf_endpoint` 镜像地址、`local_dir` 本地目录、`base_url`/`env_key`/`api_key` API 鉴权。模型一旦选定不要换，否则 notes/frameworks/episodes 向量库需要全量重建。
 - `memory.*`：记忆块字符上限、召回硬预算、近因半衰期
 - `paths.*`：history/vectordb/skills/rules 目录
 

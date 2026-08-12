@@ -36,8 +36,30 @@ class ProviderConfig(BaseModel):
 
 
 class EmbedConfig(BaseModel):
+    # provider: local（默认本地 sentence-transformers）或 openai_compat（云端 embedding API）
+    provider: Literal["local", "openai_compat"] = "local"
     name: str = "Qwen/Qwen3-Embedding-0.6B"
     device: str | None = None
+    # 本地模型相关
+    hf_endpoint: str | None = None  # 镜像地址，如 https://hf-mirror.com
+    local_dir: str | None = None    # 已下载的本地模型目录
+    # 云端 API 相关
+    base_url: str | None = None
+    env_key: str = ""             # 从 .env 读取 API key 的变量名
+    api_key: str | None = None     # 直接写死的 key（不推荐，env_key 优先）
+    batch_size: int = 64           # 调用 API 时单次请求最大文本数
+
+    def resolve_api_key(self) -> str | None:
+        if self.api_key:
+            return self.api_key
+        if self.env_key:
+            key = os.environ.get(self.env_key)
+            if not key:
+                raise KeyError(
+                    f"embedding provider 需要环境变量 {self.env_key}。请在 .env 中填入对应 API key。"
+                )
+            return key
+        return None
 
 
 class ModelsConfig(BaseModel):
