@@ -14,6 +14,16 @@ Alfred 是一个以**长期记忆**和**个人知识库**为核心的私人智�
 
 环境要求：Python 3.11+
 
+### 使用 conda（推荐，含 web 版 conda 环境）
+
+```bash
+conda env create -f environment.yml
+conda activate alfred
+cp .env.example .env   # 填入你的 API key
+```
+
+### 使用 pip（不使用 conda 时）
+
 ```bash
 pip install -e ".[dev]"
 cp .env.example .env   # 填入你的 API key

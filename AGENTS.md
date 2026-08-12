@@ -1,23 +1,315 @@
 # AGENTS.md
 
-## 项目简介
-Alfred —— 私人管家 AI Agent（Python 3.13，conda base 环境）。
-核心：长期记忆 + 笔记 RAG + skills 扩展 + 自我成长。
+> 本文件面向 AI 编程助手。阅读前默认不了解本项目；所有信息基于当前仓库实际内容，而非假设。
 
-## 环境
-- 使用 conda base 环境：`source /opt/homebrew/Caskroom/miniconda/base/etc/profile.d/conda.sh && conda activate base`
-- 不使用 venv（已废弃）。安装：`pip install -e ".[dev]"`
+## 项目概览
 
-## 命令
-- 测试：`python -m pytest tests/ -q`
-- 运行：`alfred chat` / `alfred models` / `alfred ingest <dir>` / `alfred feed <file>` / `alfred consolidate`
+**Alfred** 是一个以"长期记忆 + 个人知识库"为核心的私人 AI 管家（Python CLI 应用）。
 
-## 约定
-- 配置驱动：`config.yaml` 是唯一模型配置入口，代码里不得硬编码模型名或 API 地址
-- 记忆层与知识层严格分离：`alfred/memory/`（对用户的认知）vs `alfred/knowledge/`（笔记/框架）
-- 记忆写入路径固定用 `models.memory_write` 强模型；闲聊路径才可切模型
-- persona 修改与 shell/python 执行必须走 `deps.confirm` 用户确认（代码层强制）
-- system prompt 组装顺序不可随意调整：静态 instructions → memory blocks → 动态层（KV-cache 纪律）
-- 会话历史 append-only；压缩走 `compaction.py`，丢内容留指针
-- 测试不依赖真实 LLM 调用与 embedding 下载，只测纯逻辑
-- 提交规范：Conventional Commits（feat/fix/docs/test/chore/refactor），按逻辑单元分开提交
+核心能力：
+- **长期记忆**：跨会话记住用户的经历、偏好、思维方式
+- **笔记 RAG**：索引个人 Markdown 笔记库，问答时引用出处
+- **喂养学习**：通读书籍/文章，提炼成思维框架卡片入库
+- **自我成长**：定期复盘对话，沉淀记忆、规则、技能草稿（用户确认后入库）
+- **模型无关**：通过声明式 provider 配置接入任意 OpenAI / Anthropic / Gemini / 本地兼容端点
+
+技术选型：Python 3.11+，Pydantic AI 作为 agent 内核，mem0 作为长期记忆层，LanceDB 作为向量存储，sentence-transformers 跑本地 embedding，Typer + Rich 做 CLI。
+
+## 环境要求
+
+- Python >= 3.11
+- 依赖管理：`pyproject.toml` + `pip`，同时提供 `environment.yml` 供 conda 用户直接使用
+- 支持 conda 环境（含 web 版 conda），也兼容原生 pip 安装
+
+## 安装
+
+### 使用 conda（推荐，含 web 版 conda 环境）
+
+```bash
+conda env create -f environment.yml
+conda activate alfred
+cp .env.example .env   # 填入至少一个 LLM API key
+```
+
+### 使用 pip
+
+```bash
+pip install -e ".[dev]"
+cp .env.example .env   # 填入至少一个 LLM API key
+```
+
+首次运行 `alfred ingest` 或 `alfred chat` 时，会按需下载 embedding 模型（约 600MB）。
+
+## 构建与测试命令
+
+```bash
+# 运行测试（不依赖真实 LLM 调用与 embedding 下载，只测纯逻辑）
+python -m pytest tests/ -q
+
+# 检查模型与 key 配置
+alfred models
+
+# 开始对话
+alfred chat
+
+# 索引笔记目录（增量）
+alfred ingest <notes_dir>
+
+# 喂养一本书/文章，提炼思维框架
+alfred feed <file.md>
+
+# 睡眠整理：复盘近期对话，产出草稿待确认
+alfred consolidate
+
+# 查看/管理长期记忆
+alfred memory list
+alfred memory delete <id_prefix>
+alfred memory history [human|persona]
+
+# 查看已发现的技能与规则
+alfred skills
+
+# 检索已提炼的思维框架
+alfred frameworks <query>
+```
+
+## 项目结构
+
+```
+Alfred/
+├── pyproject.toml          # 包元数据、依赖、entry point
+├── config.yaml             # 唯一模型/路径配置入口（代码不得硬编码模型）
+├── .env.example            # API key 模板
+├── README.md               # 用户文档
+├── AGENTS.md               # 本文件
+│
+├── alfred/                 # 核心包
+│   ├── __init__.py
+│   ├── cli.py              # Typer CLI 入口与所有子命令
+│   ├── config.py           # 配置模型与加载（Pydantic + YAML + .env）
+│   ├── llm.py              # provider:model → pydantic-ai model 实例
+│   ├── agent.py            # agent 内核：三层 prompt + 恒定工具集
+│   ├── history.py          # 会话历史 JSONL 归一化持久化
+│   ├── compaction.py       # 上下文压缩：丢内容留指针 + 偏好优先
+│   │
+│   ├── memory/             # 记忆层（agent 对用户的认知）
+│   │   ├── blocks.py       # human/persona 常驻记忆块 + git 版本化
+│   │   ├── longterm.py     # mem0 开源版封装（异步写入、失败降级）
+│   │   ├── recall.py       # 混合召回：预算控制 + 相关性/近因排序
+│   │   ├── episodic.py     # 情景记忆：成功案例四元组库
+│   │   └── consolidate.py  # sleep-time 整理：复盘 → 草稿 → 确认入库
+│   │
+│   ├── knowledge/          # 知识层（用户笔记与喂养材料）
+│   │   ├── chunking.py     # Markdown 标题层级切分 + frontmatter
+│   │   ├── embed.py        # 本地 Qwen3-Embedding 模型封装
+│   │   ├── store.py        # LanceDB 向量存储（notes/frameworks/episodes）
+│   │   ├── ingest.py       # 笔记增量索引管线
+│   │   └── feed.py         # 喂书管线：分段通读 → 框架卡片 → 入库校验
+│   │
+│   ├── skills/             # 内置 skill 加载器
+│   │   ├── loader.py       # 扫描 SKILL.md、三级披露注入
+│   │   └── __init__.py
+│   └── rules/              # 规则文件加载器
+│       ├── loader.py       # 扫描 rules/*.md、frontmatter 触发器
+│       └── __init__.py
+│
+├── skills/                 # 项目级 skills（用户/项目均可扩展）
+│   ├── software-dev-workflow/SKILL.md
+│   └── framework-distiller/SKILL.md
+│
+├── rules/                  # 项目级规则文件
+│   └── communication-style.md
+│
+├── tests/                  # 测试（纯逻辑，不碰真实 LLM/embedding）
+│   ├── test_config.py
+│   ├── test_blocks.py
+│   ├── test_chunking.py
+│   ├── test_memory_history.py
+│   └── test_skills_rules.py
+│
+└── data/                   # 运行时数据（.gitignore，不提交）
+    ├── memory/             # human.md / persona.md（独立 git 仓库）
+    ├── history/            # 会话 JSONL
+    └── vectordb/           # LanceDB + mem0 Qdrant 本地数据
+```
+
+## 技术栈
+
+| 层级 | 选型 | 说明 |
+|---|---|---|
+| Agent 框架 | Pydantic AI | 模型无关、统一消息模型、支持跨模型续跑 |
+| 长期记忆 | mem0ai + 本地 Qdrant | 开源版，异步写入，失败降级 |
+| 核心记忆块 | 自研 `MemoryBlocks` + GitPython | human/persona 常驻 prompt，git 版本化 |
+| 向量存储 | LanceDB | 嵌入式，notes/frameworks/episodes 三张表 |
+| Embedding | sentence-transformers | 默认 `Qwen/Qwen3-Embedding-0.6B` 本地运行 |
+| CLI | Typer + Rich + prompt-toolkit | 命令与交互式对话 |
+| 配置 | PyYAML + pydantic + python-dotenv | `config.yaml` + `.env` |
+| 测试 | pytest | 纯逻辑测试 |
+
+## 配置入口（config.yaml）
+
+`config.yaml` 是唯一的模型/路径配置入口，代码里不得硬编码模型名或 API 地址。
+
+关键字段：
+- `providers.<name>`：声明式 provider，含 `type`（`openai_compat` / `anthropic` / `gemini`）、`base_url`、`env_key`、可用 `models`
+- `models.chat`：闲聊模型，对话中可用 `/model provider:model` 自由切换
+- `models.memory_write`：记忆写入/复盘模型，固定强模型，质量敏感
+- `models.embed`：本地 embedding 模型，选定后不要换（换 = 全量重建索引）
+- `memory.*`：记忆块字符上限、召回硬预算、近因半衰期
+- `paths.*`：history/vectordb/skills/rules 目录
+
+模型引用格式统一为 `provider:model`，由 `config.resolve()` 解析。
+
+## 代码组织与模块职责
+
+### CLI（`alfred/cli.py`）
+- 所有用户命令入口：`chat`、`ingest`、`feed`、`frameworks`、`consolidate`、`memory`、`skills`、`models`
+- `chat` 内支持斜杠命令：`/exit`、`/new`、`/model`、`/remember`、`/memory`、`/why`、`/sessions`、`/help`
+- 用户确认回调 `_confirm` 通过 `AlfredDeps.confirm` 注入 agent
+
+### Agent 内核（`alfred/agent.py`）
+- `build_agent()`：组装 Pydantic AI Agent，绑定模型、三层 system prompt、恒定工具集
+- `chat_turn()`：单轮对话循环入口，包含压缩检查、历史恢复、运行、持久化
+- `AlfredDeps`：运行时依赖对象（config、blocks、confirm 回调、本轮召回记录）
+
+**System prompt 三层顺序（KV-cache 纪律，不可随意调整）：**
+1. 静态层：`INSTRUCTIONS`（人格/行为准则/工具准则）
+2. 半静态层：`persona` 块 + `human` 块（`agent.py` 中 `inject_persona`、`inject_human`）
+3. 动态层：常驻规则、可召回规则索引、skills 索引、当前日期
+
+**恒定工具集（`agent.py` 中注册）：**
+- `memory_search`：长期记忆召回
+- `memory_update_block`：更新 human/persona 块（persona 修改需用户确认）
+- `notes_search`：笔记 RAG
+- `file_read`：读取技能/规则/任意文本文件
+- `shell`：执行 shell 命令（需用户确认）
+- `run_python`：执行 Python 代码（需用户确认）
+
+### 记忆层（`alfred/memory/`）
+- `blocks.py`：`human`/`persona` 两个常驻记忆块，字符上限 `memory.block_char_limit`，每次修改自动 git commit
+- `longterm.py`：mem0 开源版懒加载单例，写入固定用 `models.memory_write`，初始化失败降级为空实现
+- `recall.py`：混合召回入口，按 `recall_budget` 硬预算截断，融合相关性 + 近因
+- `episodic.py`：情景记忆四元组（场景/思路/行动/结果），存 LanceDB `episodes` 表
+- `consolidate.py`：sleep-time 整理，产出 memory_entries / human_block_update / rule_suggestions / stale_memories 四类草稿，逐项确认后入库
+
+### 知识层（`alfred/knowledge/`）
+- `chunking.py`：按 Markdown 标题层级切分，保留标题路径前缀，解析 frontmatter
+- `embed.py`：本地 embedding 模型封装（Qwen3-Embedding），query 带 instruction 前缀
+- `store.py`：LanceDB 表操作（`notes`、`frameworks`、`episodes`）
+- `ingest.py`：增量索引 Markdown 目录（文件 hash 判断变更）
+- `feed.py`：喂书管线，分段提炼框架卡片，四要素校验后入库
+
+### 配置与模型（`alfred/config.py`、`alfred/llm.py`）
+- `config.py`：Pydantic 模型 + YAML 加载 + `.env` 加载 + 路径解析
+- `llm.py`：把 `provider:model` 映射为 `AnthropicModel` / `OpenAIChatModel` / `GeminiModel`
+
+## 开发约定
+
+1. **配置驱动**：`config.yaml` 是唯一模型配置入口，代码里不得硬编码模型名或 API 地址。
+2. **记忆层与知识层严格分离**：
+   - `alfred/memory/`：agent 对用户的认知
+   - `alfred/knowledge/`：用户笔记/喂养材料
+3. **记忆写入路径固定强模型**：长期记忆抽取、consolidate 复盘必须走 `models.memory_write`；闲聊路径才允许切换模型。
+4. **用户确认强制化**：persona 修改、shell 执行、run_python 执行必须走 `deps.confirm` 用户确认，在代码层强制，不靠 prompt 约束。
+5. **System prompt 顺序不可随意调整**：静态 instructions → memory blocks → 动态层（规则/skills/日期）。
+6. **会话历史 append-only**：`history.py` 以 JSONL append-only 写入；压缩时整体重写并作废 `llm_state`。
+7. **上下文压缩纪律**：丢内容留指针，用户偏好/进行中任务最高保留优先级，工具输出超长时裁剪为引用。
+8. **记忆块版本化**：`data/memory/` 是独立 git 仓库，`human`/`persona` 每次修改自动 commit。
+9. **测试不依赖真实 LLM**：所有测试不得调用真实模型 API 或下载 embedding，只测纯逻辑。
+10. **路径相对项目根解析**：配置中的相对路径基于 `PROJECT_ROOT` 解析，`~` 自动展开。
+
+## 测试策略
+
+```bash
+python -m pytest tests/ -q
+```
+
+测试文件与覆盖范围：
+- `test_config.py`：配置模型、provider 解析、env_key 读取
+- `test_blocks.py`：memory blocks 读写、字符上限、git 版本化、回滚
+- `test_chunking.py`：Markdown 切分、frontmatter 解析、超长段落二次切分
+- `test_memory_history.py`：召回预算/近因排序、会话历史持久化与重写
+- `test_skills_rules.py`：skills/rules 扫描、三级披露、frontmatter 触发器
+
+**约束**：测试不依赖真实 LLM 调用、不下载 embedding 模型、不访问外部 API。
+
+## 安全与隐私
+
+- **数据本地优先**：所有记忆、笔记索引、会话历史默认存储在 `data/` 目录（已被 `.gitignore` 排除）。
+- **API key 不提交**：`.env` 被 `.gitignore` 忽略，API key 通过 `env_key` 在 `config.yaml` 中声明引用。
+- **危险操作需确认**：shell / run_python / persona 修改必须用户确认，确认函数由 CLI 注入。
+- **Telemetry 关闭**：`longterm.py` 中设置 `MEM0_TELEMETRY=false`，防止私人数据上报。
+- **文件读取范围**：`file_read` 工具目前只检查文件存在性，不限制路径范围；读取用户指定文件时按操作系统权限执行。
+- **命令执行超时**：shell / run_python 默认 60 秒超时，输出截断至 5000 字符。
+
+## 扩展机制
+
+### Skills
+- 格式：`skills/<name>/SKILL.md`，含 YAML frontmatter（`name`、`description`）+ Markdown 正文
+- 三级披露：启动只注入 name+description → agent 判定相关后用 `file_read` 读正文 → 按需读同目录资源
+- 推荐正文分节：Procedure / Specifications / Advice / Forbidden Actions / Required from User
+- 扫描目录由 `config.yaml` 的 `paths.skills_dirs` 控制，项目级 `skills/` 优先于用户级 `~/.config/alfred/skills`
+
+### Rules
+- 格式：`rules/*.md`，含 YAML frontmatter
+- 触发器：
+  - `alwaysApply: true`：常驻注入 system prompt
+  - `description`：进入可召回规则索引，由 agent 用 `file_read` 激活
+  - `globs`：按文件 glob 匹配（语义预留，当前未实现自动匹配）
+- 扫描目录由 `config.yaml` 的 `paths.rules_dirs` 控制
+
+## 运行时数据布局
+
+```
+data/
+├── memory/                 # 独立 git 仓库
+│   ├── .git/
+│   ├── human.md
+│   └── persona.md
+├── history/
+│   └── <session_id>.jsonl  # 归一化消息 + llm_state 记录
+└── vectordb/
+    ├── lancedb/            # LanceDB 数据
+    └── qdrant_mem0/        # mem0 本地 Qdrant
+```
+
+## 常见坑点
+
+- **换 embedding 模型必须重建索引**：`models.embed.name` 一旦确定不要轻易更换，否则 notes/frameworks/episodes 向量库需要全量重建。
+- **mem0 初始化失败会静默降级**：`longterm.py` 初始化失败会标记 `_init_failed`，后续记忆写入/召回都为空操作，不会阻塞对话。
+- **persona 修改需要用户确认**：agent 调用 `memory_update_block(name="persona")` 时，若 `deps.confirm` 返回 False 则写入被拒绝。
+- **压缩会作废 llm_state**：`compaction.py` 蒸馏旧消息后调用 `session.rewrite()`，跨模型精确续跑回退为"摘要 + 近期消息"的种子上下文。
+- **聊天内切换模型会重建 agent**：`/model provider:model` 会调用 `build_agent(config, arg)`，历史消息以归一化 transcript 做种子上下文。
+
+## 部署与分发
+
+当前为纯 Python CLI 包，通过 `pyproject.toml` 的 `[project.scripts]` 注册 `alfred` 命令：
+
+```toml
+[project.scripts]
+alfred = "alfred.cli:app"
+```
+
+分发方式：
+- 开发（conda）：`conda env create -f environment.yml && conda activate alfred`
+- 开发（pip）：本地 `pip install -e ".[dev]"`
+- 无容器/云部署脚本，当前阶段以本地个人使用为主
+
+## 提交规范
+
+项目约定使用 Conventional Commits，按逻辑单元分开提交：
+
+- `feat`: 新功能
+- `fix`: 修复
+- `docs`: 文档
+- `test`: 测试
+- `chore`: 杂项
+- `refactor`: 重构
+
+## 参考文档
+
+- `README.md`：用户视角快速开始
+- `docs/plans/2026-08-implementation-plan.md`：完整架构实施计划与设计依据
+- `docs/research/2026-08-personal-butler-agent-tech-selection.md`：技术选型调研报告
+- `config.yaml`：配置示例与注释
+- `.env.example`：API key 环境变量模板
