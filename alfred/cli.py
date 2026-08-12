@@ -32,11 +32,44 @@ def _confirm(msg: str) -> bool:
 
 
 @app.command()
-def models():
-    """列出配置的 provider 与模型，检查 key 可用性。"""
-    from .llm import list_models
+def models(
+    model_ref: str | None = typer.Argument(None, help="要测试的 provider:model"),
+    all_models: bool = typer.Option(False, "--all", help="测试所有配置的模型"),
+):
+    """列出配置的 provider 与模型，检查 key 可用性；可测试单个或全部模型连通性。"""
+    from .llm import check_model_connection, list_models
 
     config = load_config()
+
+    if all_models:
+        rows = list_models(config)
+        if not rows:
+            console.print("[red]config.yaml 中没有配置任何 provider。[/red]")
+            raise typer.Exit(1)
+        for ref, _ptype, _ready in rows:
+            with console.status(f"[dim]测试 {ref} ...[/dim]"):
+                result = check_model_connection(config, ref)
+            if result["ok"]:
+                console.print(f"  [green]✓[/green]  {ref}  {result['latency_ms']}ms")
+            else:
+                console.print(f"  [red]✗[/red]  {ref}  {result['error']}")
+        return
+
+    if model_ref:
+        try:
+            config.resolve(model_ref)
+        except (KeyError, ValueError) as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+        with console.status(f"[dim]测试 {model_ref} ...[/dim]"):
+            result = check_model_connection(config, model_ref)
+        if result["ok"]:
+            console.print(f"  [green]✓[/green]  {model_ref}  {result['latency_ms']}ms")
+        else:
+            console.print(f"  [red]✗[/red]  {model_ref}  {result['error']}")
+        return
+
+    # 默认：列出配置，不调用 API
     rows = list_models(config)
     if not rows:
         console.print("[red]config.yaml 中没有配置任何 provider。[/red]")
