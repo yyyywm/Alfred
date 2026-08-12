@@ -143,23 +143,7 @@ def chat(session_id: str = typer.Option(None, "--session", "-s", help="恢复指
                 else:
                     console.print("[dim]上一轮没有使用长期记忆。[/dim]")
             elif cmd == "/status":
-                from .llm import check_model_connection
-                with console.status(f"[dim]测试 {config.models.chat} ...[/dim]"):
-                    result = check_model_connection(config, config.models.chat)
-                if result["ok"]:
-                    console.print(Panel(
-                        f"当前模型：{config.models.chat}\n"
-                        f"[green]✓[/green]  连接正常  {result['latency_ms']:.0f}ms",
-                        title="连接状态",
-                        border_style="green",
-                    ))
-                else:
-                    console.print(Panel(
-                        f"当前模型：{config.models.chat}\n"
-                        f"[red]✗[/red]  {result['error']}",
-                        title="连接状态",
-                        border_style="red",
-                    ))
+                _show_status(config)
             elif cmd == "/sessions":
                 for sid, mtime, n in list_sessions(config)[:10]:
                     from datetime import datetime
@@ -198,6 +182,27 @@ def _show_memory(config) -> None:
         return
     for m in items:
         console.print(f"  [{m.get('id', '?')[:8]}] {m.get('memory', m)}")
+
+
+def _show_status(config) -> None:
+    """在 chat 内显示当前 chat 模型的连接状态。"""
+    from .llm import check_model_connection
+    with console.status(f"[dim]测试 {config.models.chat} ...[/dim]"):
+        result = check_model_connection(config, config.models.chat)
+    if result["ok"]:
+        console.print(Panel(
+            f"当前模型：{config.models.chat}\n"
+            f"[green]✓[/green]  连接正常  {result['latency_ms']:.0f}ms",
+            title="[bold]连接状态[/bold]",
+            border_style="green",
+        ))
+    else:
+        console.print(Panel(
+            f"当前模型：{config.models.chat}\n"
+            f"[red]✗[/red]  {result['error']}",
+            title="[bold]连接状态[/bold]",
+            border_style="red",
+        ))
 
 
 @app.command()
