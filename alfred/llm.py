@@ -106,7 +106,7 @@ def check_model_connection(config: Config, model_ref: str, timeout: float = 10.0
         )
         agent.run_sync(
             "ping",
-            model_settings=ModelSettings(timeout=timeout, max_tokens=5),
+            model_settings=ModelSettings(timeout=timeout),
         )
         return {
             "ok": True,
