@@ -14,9 +14,10 @@ from pathlib import Path
 from datetime import datetime
 
 import typer
+from prompt_toolkit import PromptSession
+from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Confirm, Prompt
 
 from alfred.events import (
     AssistantChunk,
@@ -37,8 +38,10 @@ console = Console()
 
 
 def _confirm(msg: str) -> bool:
-    console.print(Panel(msg, title="[yellow]确认请求[/yellow]", border_style="yellow"))
-    return Confirm.ask("是否允许", default=False)
+    """在工作线程中请求用户确认；避开 Rich Console 以减少线程竞争。"""
+    print(f"\n{'=' * 60}\n确认请求\n{'=' * 60}\n{msg}\n{'=' * 60}")
+    answer = input("是否允许 [y/N]: ").strip().lower()
+    return answer in ("y", "yes")
 
 
 def _print_connection_result(ref: str, result: dict) -> None:
@@ -124,9 +127,14 @@ def chat(session_id: str = typer.Option(None, "--session", "-s", help="恢复指
         title="[bold]私人管家[/bold]",
     ))
 
+    prompt_session = PromptSession(
+        "你: ",
+        style=Style.from_dict({"prompt": "cyan bold"}),
+    )
+
     while True:
         try:
-            user_input = Prompt.ask("\n[bold cyan]你[/bold cyan]").strip()
+            user_input = prompt_session.prompt().strip()
         except (EOFError, KeyboardInterrupt):
             break
         if not user_input:
@@ -175,28 +183,29 @@ def chat(session_id: str = typer.Option(None, "--session", "-s", help="恢复指
                 console.print(f"[red]未知命令 {cmd}，输入 /help 查看。[/red]")
             continue
 
+        # 分隔用户输入与助手输出
+        console.print()
+
         reply_parts: list[str] = []
-        bus = EventBus()
-        _state = {"tool_line_length": 0}
-
-        def _render(event):
-            if isinstance(event, AssistantChunk):
-                console.out(event.delta, end="")
-                reply_parts.append(event.delta)
-            elif isinstance(event, ToolCallStart):
-                tool_line = f"\n🔧 {event.tool_name} ..."
-                console.print(tool_line, end="")
-                _state["tool_line_length"] = len(tool_line)
-            elif isinstance(event, (ToolCallEnd, ToolDenied)):
-                console.print("\r" + " " * _state["tool_line_length"] + "\r", end="")
-
-        bus.subscribe(_render)
-
         try:
-            for _event in chat_turn_stream(agent, deps, session, user_input, bus=bus):
-                pass
-        except Exception as e:
-            console.print(f"\n[red]出错了：{e}[/red]")
+            for event in chat_turn_stream(agent, deps, session, user_input, bus=EventBus()):
+                if isinstance(event, AssistantChunk):
+                    if not reply_parts:
+                        console.print("[bold green]助手：[/bold green] ", end="")
+                    console.out(event.delta, end="")
+                    reply_parts.append(event.delta)
+                elif isinstance(event, ToolCallStart):
+                    console.print(f"[dim]🔧 {event.tool_name} ...[/dim]")
+                elif isinstance(event, ToolCallEnd):
+                    mark = "[green]✓[/green]" if not event.is_error else "[red]✗[/red]"
+                    console.print(f"[dim]🔧 {event.tool_name} {mark}[/dim]")
+                elif isinstance(event, ToolDenied):
+                    console.print(f"[dim]🔧 {event.tool_name} [red]已拒绝[/red][/dim]")
+        except (Exception, KeyboardInterrupt) as e:
+            if isinstance(e, KeyboardInterrupt):
+                console.print("\n[dim]已中断。[/dim]")
+            else:
+                console.print(f"\n[red]出错了：{e}[/red]")
             continue
         console.print()
         reply = "".join(reply_parts)
