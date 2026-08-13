@@ -9,8 +9,9 @@
 工具调用数据模型：
 - ``ToolCallRecord`` 是 assistant 消息上的非规范化摘要（tool_name/args/result/is_error/tool_call_id），
   用于复盘与上下文呈现，并不替代完整工具结果。
-- 完整工具结果通过 ``add_tool()`` 独立保存为 ``role="tool"`` 消息，并通过 ``tool_call_id``
-  与 assistant 消息上的 ``ToolCallRecord`` 关联。
+- ``add_tool()`` 可供调用者独立保存完整工具结果为 ``role="tool"`` 消息；但当前 agent 循环
+  将完整工具结果保留在 pydantic-ai 的 ``llm_state`` 中，``ToolCallRecord`` 只是归一化消息里的
+  一份去规范化摘要。
 
 时间戳等易变信息放消息层（KV-cache 纪律：不进 system prompt 头部）。
 """

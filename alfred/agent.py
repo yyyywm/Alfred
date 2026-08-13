@@ -241,7 +241,10 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
         """更新核心记忆块（human=对用户的认知 / persona=自己的人格设定）。
         content 为整块新内容（含原内容的基础上修改），不是追加。
         修改 persona 需要用户确认。"""
-        return ctx.deps.blocks.update(name, content, reason)
+        blocks = ctx.deps.blocks
+        if blocks is None:
+            return "错误：记忆块未初始化，无法更新。"
+        return blocks.update(name, content, reason)
 
     def notes_search(ctx: RunContext[AlfredDeps], query: str, limit: int = 5) -> str:
         """在用户的个人笔记库中搜索相关内容。返回带出处（文件与章节）的片段。
@@ -340,7 +343,7 @@ def chat_turn_stream(
             f"{session.transcript()}\n\n---\n\n用户现在说：{user_input}"
         )
 
-    bus = bus or deps.bus or EventBus()
+    bus = bus or EventBus()
     queue: Queue[Event | None] = Queue()
     bus.subscribe(queue.put)
 
@@ -438,7 +441,13 @@ def chat_turn(
     Returns the assistant's final text output.
     """
     output_parts: list[str] = []
+    compacted = False
     for event in chat_turn_stream(agent, deps, session, user_input):
         if isinstance(event, AssistantChunk):
             output_parts.append(event.delta)
-    return "".join(output_parts)
+        elif isinstance(event, ContextCompacted):
+            compacted = True
+    reply = "".join(output_parts)
+    if compacted:
+        return f"（上下文已自动压缩）\n\n{reply}"
+    return reply

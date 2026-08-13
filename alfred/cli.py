@@ -24,7 +24,6 @@ from alfred.events import (
     ToolCallEnd,
     ToolCallStart,
     ToolDenied,
-    TurnError,
 )
 
 from .agent import AlfredDeps, build_agent, chat_turn_stream
@@ -190,8 +189,6 @@ def chat(session_id: str = typer.Option(None, "--session", "-s", help="恢复指
                 _state["tool_line_length"] = len(tool_line)
             elif isinstance(event, (ToolCallEnd, ToolDenied)):
                 console.print("\r" + " " * _state["tool_line_length"] + "\r", end="")
-            elif isinstance(event, TurnError):
-                console.print(f"\n[red]运行出错：{event.error}[/red]")
 
         bus.subscribe(_render)
 

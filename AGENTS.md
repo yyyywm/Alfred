@@ -89,6 +89,7 @@ Alfred/
 │   ├── config.py           # 配置模型与加载（Pydantic + YAML + .env）
 │   ├── llm.py              # provider:model → pydantic-ai model 实例
 │   ├── agent.py            # agent 内核：三层 prompt + 恒定工具集
+│   ├── events.py           # 事件总线： TurnStart/AssistantChunk/ToolCall*/TurnEnd 等
 │   ├── history.py          # 会话历史 JSONL 归一化持久化
 │   ├── compaction.py       # 上下文压缩：丢内容留指针 + 偏好优先
 │   │
@@ -169,8 +170,12 @@ Alfred/
 
 ### Agent 内核（`alfred/agent.py`）
 - `build_agent()`：组装 Pydantic AI Agent，绑定模型、三层 system prompt、恒定工具集
-- `chat_turn()`：单轮对话循环入口，包含压缩检查、历史恢复、运行、持久化
-- `AlfredDeps`：运行时依赖对象（config、blocks、confirm 回调、本轮召回记录）
+- `chat_turn_stream()`：单轮对话循环入口，基于 `EventBus` 以流式事件（`TurnStart`、`AssistantChunk`、
+  `ToolCallStart`、`ToolCallEnd`、`ToolDenied`、`TurnEnd`、`TurnError`、`ContextCompacted`）
+  返回运行过程；循环外通过订阅 `EventBus` 观察事件，不侵入核心逻辑
+- `_wrap_tool()`：为所有工具统一包装确认流程与生命周期事件（`ToolCallStart`/`ToolCallEnd`/`ToolDenied`）
+- `chat_turn()`：`chat_turn_stream()` 的同步兼容包装， drains 事件流后返回最终文本
+- `AlfredDeps`：运行时依赖对象（config、blocks、confirm 回调、本轮召回记录、session_id、bus）
 
 **System prompt 三层顺序（KV-cache 纪律，不可随意调整）：**
 1. 静态层：`INSTRUCTIONS`（人格/行为准则/工具准则）
