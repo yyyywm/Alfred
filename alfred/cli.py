@@ -11,9 +11,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from datetime import datetime
+
 import typer
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
@@ -23,7 +24,6 @@ from alfred.events import (
     ToolCallEnd,
     ToolCallStart,
     ToolDenied,
-    TurnEnd,
     TurnError,
 )
 
@@ -171,7 +171,6 @@ def chat(session_id: str = typer.Option(None, "--session", "-s", help="恢复指
                 _show_status(config)
             elif cmd == "/sessions":
                 for sid, mtime, n in list_sessions(config)[:10]:
-                    from datetime import datetime
                     console.print(f"  {sid}  {datetime.fromtimestamp(mtime):%m-%d %H:%M}  {n} 条消息")
             else:
                 console.print(f"[red]未知命令 {cmd}，输入 /help 查看。[/red]")
@@ -179,15 +178,18 @@ def chat(session_id: str = typer.Option(None, "--session", "-s", help="恢复指
 
         reply_parts: list[str] = []
         bus = EventBus()
+        _state = {"tool_line_length": 0}
 
         def _render(event):
             if isinstance(event, AssistantChunk):
                 console.out(event.delta, end="")
                 reply_parts.append(event.delta)
             elif isinstance(event, ToolCallStart):
-                console.print(f"\n🔧 {event.tool_name} ...", end="")
+                tool_line = f"\n🔧 {event.tool_name} ..."
+                console.print(tool_line, end="")
+                _state["tool_line_length"] = len(tool_line)
             elif isinstance(event, (ToolCallEnd, ToolDenied)):
-                console.print("\r" + " " * 40 + "\r", end="")
+                console.print("\r" + " " * _state["tool_line_length"] + "\r", end="")
             elif isinstance(event, TurnError):
                 console.print(f"\n[red]运行出错：{event.error}[/red]")
 
