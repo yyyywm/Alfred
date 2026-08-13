@@ -24,6 +24,16 @@ Role = Literal["user", "assistant", "tool"]
 
 
 @dataclass
+class ToolCallRecord:
+    """助理消息上附带的工具调用记录，用于后续复盘与上下文呈现。"""
+
+    tool_name: str
+    args: dict
+    result: str
+    is_error: bool = False
+
+
+@dataclass
 class Message:
     role: Role
     content: str
@@ -31,6 +41,16 @@ class Message:
     name: str | None = None          # 工具名（role=tool 时）
     tool_call_id: str | None = None
     compacted: bool = False          # 被压缩裁剪过的标记
+    tool_calls: list[ToolCallRecord] = field(default_factory=list)
+
+
+def _message_from_record(record: dict) -> Message:
+    """从 JSON 恢复 Message，并把嵌套的工具调用记录转回 dataclass。"""
+    record = dict(record)
+    record.pop("type", None)
+    tool_call_dicts = record.pop("tool_calls", [])
+    tool_calls = [ToolCallRecord(**r) for r in tool_call_dicts]
+    return Message(tool_calls=tool_calls, **record)
 
 
 class Session:
@@ -54,8 +74,7 @@ class Session:
             if record.get("type") == "llm_state":
                 self.llm_state = record["data"].encode("utf-8")
             else:
-                record.pop("type", None)
-                self.messages.append(Message(**record))
+                self.messages.append(_message_from_record(record))
 
     def _write_line(self, record: dict) -> None:
         with self.file.open("a", encoding="utf-8") as f:
@@ -68,8 +87,12 @@ class Session:
     def add_user(self, content: str) -> None:
         self.append(Message(role="user", content=content))
 
-    def add_assistant(self, content: str) -> None:
-        self.append(Message(role="assistant", content=content))
+    def add_assistant(
+        self, content: str, tool_calls: list[ToolCallRecord] | None = None
+    ) -> None:
+        self.append(
+            Message(role="assistant", content=content, tool_calls=tool_calls or [])
+        )
 
     def add_tool(self, name: str, content: str, tool_call_id: str | None = None) -> None:
         self.append(Message(role="tool", content=content, name=name, tool_call_id=tool_call_id))
