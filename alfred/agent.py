@@ -329,7 +329,7 @@ def chat_turn_stream(
             f"{session.transcript()}\n\n---\n\n用户现在说：{user_input}"
         )
 
-    bus = bus or EventBus()
+    bus = bus or deps.bus or EventBus()
     queue: Queue[Event | None] = Queue()
     bus.subscribe(queue.put)
 
@@ -373,7 +373,7 @@ def chat_turn_stream(
                             bus.emit(
                                 AssistantChunk(session_id=session.id, delta=delta)
                             )
-                    output = result.get_output()
+                    output += result.get_output()
 
                     messages = result.all_messages()
                     last_response = next(
