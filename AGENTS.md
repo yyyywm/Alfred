@@ -166,8 +166,10 @@ Alfred/
 ### CLI（`alfred/cli.py`）
 - 所有用户命令入口：`chat`、`ingest`、`feed`、`frameworks`、`consolidate`、`memory`、`skills`、`models`
 - `chat` 内支持斜杠命令：`/exit`、`/new`、`/model`、`/remember`、`/memory`、`/why`、`/sessions`、`/help`
-- `chat` 交互使用 `prompt_toolkit.PromptSession`：支持行编辑（光标移动、删除、历史）、长输入；回复前有 `助手： ` 前缀并与用户输入空行分隔；工具调用单独成行显示
+- `chat` 启动选项：`--session/-s` 恢复会话、`--debug` 启用调试日志输出到控制台
+- `chat` 交互使用 `prompt_toolkit.PromptSession`：支持行编辑（光标移动、删除、历史）、长输入；发送后显示 `助手正在思考...` spinner，收到首个事件后切换为 `助手： ` 前缀；工具调用单独成行显示
 - 所有 Rich Console 输出集中在主线程渲染，避免与后台 agent 线程竞争；用户确认回调 `_confirm` 用原生 `print/input` 实现以降低线程安全风险
+- chat 日志通过 `_setup_chat_logger` 写入 `data/logs/alfred.log`（RotatingFileHandler，5MB×3），`--debug` 时同时输出到控制台；记录会话开始/结束、每轮输入/回复长度、工具调用、异常堆栈
 
 ### Agent 内核（`alfred/agent.py`）
 - `build_agent()`：组装 Pydantic AI Agent，绑定模型、三层 system prompt、恒定工具集
@@ -284,12 +286,14 @@ data/
 ## 常见坑点
 
 - **换 embedding 模型必须重建索引**：`models.embed.name` 一旦确定不要轻易更换，否则 notes/frameworks/episodes 向量库需要全量重建。
-- **mem0 初始化失败会静默降级**：`longterm.py` 初始化失败会标记 `_init_failed`，后续记忆写入/召回都为空操作，不会阻塞对话。
+- **mem0 初始化失败会静默降级**：`longterm.py` 初始化失败会标记 `_init_failed`，后续记忆写入/召回都为空操作，不会阻塞对话。常见原因是 Qdrant 本地存储残留 `.lock` 文件（异常退出导致），`get_memory` 已支持自动清理锁文件并重试一次。
+- **mem0 Qdrant 锁文件残留**：如果 `alfred memory list` 长期为空且对话看似有记忆（实际是会话历史），检查 `data/vectordb/qdrant_mem0/.lock` 是否存在。`get_memory` 会自动清理，若仍失败可手动删除该文件后重启。
 - **persona 修改需要用户确认**：agent 调用 `memory_update_block(name="persona")` 时，若 `deps.confirm` 返回 False 则写入被拒绝。
 - **压缩会作废 llm_state**：`compaction.py` 蒸馏旧消息后调用 `session.rewrite()`，跨模型精确续跑回退为"摘要 + 近期消息"的种子上下文。
 - **聊天内切换模型会重建 agent**：`/model provider:model` 会调用 `build_agent(config, arg)`，历史消息以归一化 transcript 做种子上下文。
 - **`alfred` 命令报 `ModuleNotFoundError`**：说明当前 Python 环境没有安装 alfred 包，或安装时指向了其他目录。先 `pip uninstall alfred`，再到项目根目录执行 `pip install -e ".[dev]"`。
 - **Rich Console 与后台线程混用会导致输出错乱或卡死**：`chat` 的渲染必须在主线程完成，事件监听只做数据传递，不直接操作 Console。
+- **mem0 后台写入可能污染终端**：`longterm.add_async` 的后台线程内用 `contextlib.redirect_stdout/stderr` 屏蔽所有输出，防止 mem0 或依赖库意外打印内容干扰 prompt_toolkit 输入。
 
 ## 部署与分发
 

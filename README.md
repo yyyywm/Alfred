@@ -47,6 +47,7 @@ alfred models
 
 - **报错 `ModuleNotFoundError: No module named 'alfred'`**：说明当前 Python 环境没有安装 alfred 包。在项目根目录执行 `pip install -e ".[dev]"` 即可。如果你之前在其他目录安装过，先运行 `pip uninstall alfred`，再到本项目根目录重新安装。
 - **不知道该激活哪个环境**：`conda env list` 查看环境；如果列表里没有 `alfred`，先执行 `conda env create -f environment.yml`。
+- **`/memory` 或 `alfred memory list` 长期为空**：可能是 mem0 本地向量库初始化失败。检查 `data/vectordb/qdrant_mem0/.lock` 是否存在，存在则删除后重启； Alfred 已支持自动清理该锁文件，若仍失败请查看 `data/logs/alfred.log`。
 
 ## 快速开始
 
@@ -63,9 +64,19 @@ alfred skills            # 查看技能与规则
 chat 交互说明：
 
 - 输入支持行编辑：方向键移动光标、Backspace/Delete、Home/End、上下翻阅历史
+- 发送后显示 `助手正在思考...` 状态提示，收到回复后自动切换为 `助手： ` 前缀
 - 你的输入和 Alfred 的回复之间有空行分隔，回复前有 `助手： ` 前缀
 - 工具调用会单独成行显示（如 `🔧 memory_search ✓`）
 - 按 `Ctrl-C` 可中断当前回复，不会退出对话
+- 对话过程会记录日志到 `data/logs/alfred.log`，便于排查问题
+
+chat 启动选项：
+
+```bash
+alfred chat                # 正常对话
+alfred chat --debug        # 启用调试日志，同时输出到控制台
+alfred chat -s <session>   # 恢复指定会话
+```
 
 chat 内斜杠命令：
 
