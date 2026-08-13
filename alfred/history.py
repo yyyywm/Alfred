@@ -6,6 +6,12 @@
 - llm_state（pydantic-ai 原生消息序列化）：供跨会话精确续跑；
   压缩后丢弃，回退为"摘要 + 近期消息"的种子上下文
 
+工具调用数据模型：
+- ``ToolCallRecord`` 是 assistant 消息上的非规范化摘要（tool_name/args/result/is_error/tool_call_id），
+  用于复盘与上下文呈现，并不替代完整工具结果。
+- 完整工具结果通过 ``add_tool()`` 独立保存为 ``role="tool"`` 消息，并通过 ``tool_call_id``
+  与 assistant 消息上的 ``ToolCallRecord`` 关联。
+
 时间戳等易变信息放消息层（KV-cache 纪律：不进 system prompt 头部）。
 """
 
@@ -25,12 +31,17 @@ Role = Literal["user", "assistant", "tool"]
 
 @dataclass
 class ToolCallRecord:
-    """助理消息上附带的工具调用记录，用于后续复盘与上下文呈现。"""
+    """助理消息上附带的工具调用记录（非规范化摘要）。
+
+    完整的工具结果消息通过 ``Session.add_tool()`` 单独持久化为 ``role="tool"`` 消息，
+    二者通过 ``tool_call_id`` 关联。
+    """
 
     tool_name: str
-    args: dict
+    args: dict[str, Any]
     result: str
     is_error: bool = False
+    tool_call_id: str | None = None
 
 
 @dataclass
