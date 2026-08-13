@@ -48,6 +48,7 @@ class EmbedConfig(BaseModel):
     env_key: str = ""             # 从 .env 读取 API key 的变量名
     api_key: str | None = None     # 直接写死的 key（不推荐，env_key 优先）
     batch_size: int = 64           # 调用 API 时单次请求最大文本数
+    dims: int | None = None        # 输出向量维度（用于 mem0/Qdrant 向量库配置）
 
     def resolve_api_key(self) -> str | None:
         if self.api_key:

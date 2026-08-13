@@ -49,19 +49,34 @@ def _build_mem0(config: Config):
             },
         }
 
+    embed_cfg = config.models.embed
+    if embed_cfg.provider == "openai_compat":
+        embedder_cfg: dict[str, Any] = {
+            "provider": "openai",
+            "config": {
+                "model": embed_cfg.name,
+                "api_key": embed_cfg.resolve_api_key() or "",
+                "openai_base_url": embed_cfg.base_url,
+            },
+        }
+    elif embed_cfg.provider == "local":
+        embedder_cfg = {
+            "provider": "huggingface",
+            "config": {"model": embed_cfg.name},
+        }
+    else:
+        raise ValueError(f"不支持的 embedding provider: {embed_cfg.provider}")
+
     mem_config: dict[str, Any] = {
         "version": "v1.1",
         "llm": llm_cfg,
-        "embedder": {
-            "provider": "huggingface",
-            "config": {"model": config.models.embed.name},
-        },
+        "embedder": embedder_cfg,
         "vector_store": {
             "provider": "qdrant",
             "config": {
                 "collection_name": "alfred_memories",
                 "path": str(qdrant_path),
-                "embedding_model_dims": 1024,  # Qwen3-Embedding-0.6B
+                "embedding_model_dims": embed_cfg.dims or 1024,
             },
         },
     }

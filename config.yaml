@@ -49,6 +49,7 @@ models:
     env_key: SILICONFLOW_API_KEY  # 从 .env 读取 key
     # api_key: null               # 或直接写 key（不推荐，会进 git）
     batch_size: 64               # API 单次最大文本数
+    # dims: 1024                 # 向量维度，用于 mem0/Qdrant；不填默认 1024（换模型务必改为实际维度）
 
 memory:
   dir: data/memory          # human.md / persona.md（独立 git 仓库版本化）
