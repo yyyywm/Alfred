@@ -17,7 +17,17 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
-from .agent import AlfredDeps, build_agent, chat_turn
+from alfred.events import (
+    AssistantChunk,
+    EventBus,
+    ToolCallEnd,
+    ToolCallStart,
+    ToolDenied,
+    TurnEnd,
+    TurnError,
+)
+
+from .agent import AlfredDeps, build_agent, chat_turn_stream
 from .config import load_config
 from .history import Session, list_sessions
 from .memory import longterm
@@ -167,14 +177,30 @@ def chat(session_id: str = typer.Option(None, "--session", "-s", help="恢复指
                 console.print(f"[red]未知命令 {cmd}，输入 /help 查看。[/red]")
             continue
 
+        reply_parts: list[str] = []
+        bus = EventBus()
+
+        def _render(event):
+            if isinstance(event, AssistantChunk):
+                console.out(event.delta, end="")
+                reply_parts.append(event.delta)
+            elif isinstance(event, ToolCallStart):
+                console.print(f"\n🔧 {event.tool_name} ...", end="")
+            elif isinstance(event, (ToolCallEnd, ToolDenied)):
+                console.print("\r" + " " * 40 + "\r", end="")
+            elif isinstance(event, TurnError):
+                console.print(f"\n[red]运行出错：{event.error}[/red]")
+
+        bus.subscribe(_render)
+
         try:
-            with console.status("[dim]思考中…[/dim]"):
-                reply = chat_turn(agent, deps, session, user_input)
+            for _event in chat_turn_stream(agent, deps, session, user_input, bus=bus):
+                pass
         except Exception as e:
-            console.print(f"[red]出错了：{e}[/red]")
+            console.print(f"\n[red]出错了：{e}[/red]")
             continue
-        console.print(Panel(Markdown(reply), title="[bold green]管家[/bold green]",
-                            border_style="green"))
+        console.print()
+        reply = "".join(reply_parts)
 
         # hot path 结束后，后台异步沉淀长期记忆
         longterm.add_async(config, user_input, reply)
