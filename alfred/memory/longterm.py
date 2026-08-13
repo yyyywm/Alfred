@@ -83,14 +83,41 @@ def _build_mem0(config: Config):
     return Memory.from_config(mem_config)
 
 
+def _is_qdrant_lock_error(exc: Exception) -> bool:
+    """判断异常是否为 Qdrant 本地存储锁冲突。"""
+    text = str(exc).lower()
+    return "already accessed by another instance" in text or "alreadylocked" in text
+
+
+def _clear_qdrant_lock(config: Config) -> bool:
+    """删除残留的 Qdrant .lock 文件，返回是否执行了清理。"""
+    qdrant_path = config.path(config.paths.vectordb_dir) / "qdrant_mem0" / ".lock"
+    if qdrant_path.is_file():
+        try:
+            qdrant_path.unlink()
+            return True
+        except OSError:
+            return False
+    return False
+
+
 def get_memory(config: Config):
-    """懒加载单例；失败返回 None（降级）。"""
+    """懒加载单例；失败返回 None（降级）。
+
+    若因 Qdrant 残留锁文件导致初始化失败，自动清理后重试一次。
+    """
     global _mem, _init_failed
     if _mem is None and not _init_failed:
         try:
             _mem = _build_mem0(config)
-        except Exception:
-            _init_failed = True
+        except Exception as exc:
+            if _is_qdrant_lock_error(exc) and _clear_qdrant_lock(config):
+                try:
+                    _mem = _build_mem0(config)
+                except Exception:
+                    _init_failed = True
+            else:
+                _init_failed = True
     return _mem
 
 
@@ -98,22 +125,31 @@ USER_ID = "owner"  # 单用户私人管家，固定 user id
 
 
 def add_async(config: Config, user_msg: str, assistant_msg: str) -> None:
-    """对话轮结束后台线程抽取记忆（hot path 零延迟）。"""
+    """对话轮结束后台线程抽取记忆（hot path 零延迟）。
+
+    后台线程内屏蔽 stdout/stderr，防止 mem0 或依赖库意外输出污染终端，
+    避免与 prompt_toolkit 的输入显示冲突。
+    """
 
     def _run():
+        import contextlib
+        import os
+
         mem = get_memory(config)
         if mem is None:
             return
-        try:
-            mem.add(
-                [
-                    {"role": "user", "content": user_msg},
-                    {"role": "assistant", "content": assistant_msg},
-                ],
-                user_id=USER_ID,
-            )
-        except Exception:
-            pass
+        with open(os.devnull, "w") as devnull:
+            with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+                try:
+                    mem.add(
+                        [
+                            {"role": "user", "content": user_msg},
+                            {"role": "assistant", "content": assistant_msg},
+                        ],
+                        user_id=USER_ID,
+                    )
+                except Exception:
+                    pass
 
     threading.Thread(target=_run, daemon=True).start()
 
