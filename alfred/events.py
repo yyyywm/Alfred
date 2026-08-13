@@ -68,6 +68,12 @@ class ContextCompacted(Event):
     retained_message_count: int
 
 
+@dataclass(frozen=True)
+class TurnError(Event):
+    session_id: str
+    error: str
+
+
 Listener = Callable[[Event], None]
 
 

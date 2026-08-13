@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import functools
 import subprocess
+import sys
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
@@ -35,6 +36,7 @@ from .events import (
     ToolCallStart,
     ToolDenied,
     TurnEnd,
+    TurnError,
     TurnStart,
 )
 from .history import Session, ToolCallRecord
@@ -71,6 +73,7 @@ class AlfredDeps:
     session_id: str = ""
     bus: EventBus = field(default_factory=EventBus)
     tool_records: list[ToolCallRecord] = field(default_factory=list)
+    tool_records_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 def _confirm_prompt(tool_name: str, args: dict) -> str | None:
@@ -98,6 +101,7 @@ def _wrap_tool(fn: Callable, tool_name: str) -> Callable:
         session_id = ctx.deps.session_id
         bus = ctx.deps.bus
         records = ctx.deps.tool_records
+        records_lock = ctx.deps.tool_records_lock
 
         bus.emit(ToolCallStart(session_id=session_id, tool_name=tool_name, args=kwargs))
 
@@ -121,15 +125,16 @@ def _wrap_tool(fn: Callable, tool_name: str) -> Callable:
                     is_error=True,
                 )
             )
-            records.append(
-                ToolCallRecord(
-                    tool_name=tool_name,
-                    args=kwargs,
-                    result=reason,
-                    is_error=True,
-                    tool_call_id=ctx.tool_call_id,
+            with records_lock:
+                records.append(
+                    ToolCallRecord(
+                        tool_name=tool_name,
+                        args=kwargs,
+                        result=reason,
+                        is_error=True,
+                        tool_call_id=ctx.tool_call_id,
+                    )
                 )
-            )
             return reason
 
         try:
@@ -145,15 +150,16 @@ def _wrap_tool(fn: Callable, tool_name: str) -> Callable:
                     is_error=True,
                 )
             )
-            records.append(
-                ToolCallRecord(
-                    tool_name=tool_name,
-                    args=kwargs,
-                    result=error_text,
-                    is_error=True,
-                    tool_call_id=ctx.tool_call_id,
+            with records_lock:
+                records.append(
+                    ToolCallRecord(
+                        tool_name=tool_name,
+                        args=kwargs,
+                        result=error_text[:5000],
+                        is_error=True,
+                        tool_call_id=ctx.tool_call_id,
+                    )
                 )
-            )
             return error_text
 
         bus.emit(
@@ -165,15 +171,16 @@ def _wrap_tool(fn: Callable, tool_name: str) -> Callable:
                 is_error=False,
             )
         )
-        records.append(
-            ToolCallRecord(
-                tool_name=tool_name,
-                args=kwargs,
-                result=str(result)[:5000],
-                is_error=False,
-                tool_call_id=ctx.tool_call_id,
+        with records_lock:
+            records.append(
+                ToolCallRecord(
+                    tool_name=tool_name,
+                    args=kwargs,
+                    result=str(result)[:5000],
+                    is_error=False,
+                    tool_call_id=ctx.tool_call_id,
+                )
             )
-        )
         return result
 
     return wrapper
@@ -280,7 +287,7 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
         适合数据处理、计算、格式转换等确定性任务——用代码而非逐字生成。"""
         try:
             proc = subprocess.run(
-                ["python3", "-c", code], capture_output=True, text=True, timeout=60
+                [sys.executable, "-c", code], capture_output=True, text=True, timeout=60
             )
             out = (proc.stdout + proc.stderr).strip()
             if len(out) > 5_000:
@@ -403,6 +410,7 @@ def chat_turn_stream(
             )
         except Exception as exc:
             error_holder.append(exc)
+            bus.emit(TurnError(session_id=session.id, error=str(exc)))
         finally:
             queue.put(None)
 

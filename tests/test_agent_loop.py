@@ -1,6 +1,7 @@
 # tests/test_agent_loop.py
+import pytest
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.messages import ModelResponse, TextPart
+from pydantic_ai.messages import ModelResponse, TextPart, ToolReturnPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
 from alfred.agent import AlfredDeps, _wrap_tool, chat_turn_stream
@@ -11,6 +12,7 @@ from alfred.events import (
     ToolCallEnd,
     ToolCallStart,
     TurnEnd,
+    TurnError,
     TurnStart,
 )
 from alfred.history import Session
@@ -30,7 +32,7 @@ def _make_tool_stream():
     async def stream(messages, info):
         has_tool_return = any(
             getattr(m, "parts", None) and any(
-                type(p).__name__ == "ToolReturnPart" for p in m.parts
+                isinstance(p, ToolReturnPart) for p in m.parts
             )
             for m in messages
         )
@@ -60,6 +62,7 @@ def test_chat_turn_stream_emits_events(tmp_path):
 
     events = list(chat_turn_stream(agent, deps, session, "say hi", bus=bus))
 
+    assert collected == events
     assert any(isinstance(e, TurnStart) for e in events)
     assert [e.delta for e in events if isinstance(e, AssistantChunk)] == [
         "Thinking...",
@@ -85,7 +88,7 @@ def _make_text_then_tool_stream():
     async def stream(messages, info):
         has_tool_return = any(
             getattr(m, "parts", None) and any(
-                type(p).__name__ == "ToolReturnPart" for p in m.parts
+                isinstance(p, ToolReturnPart) for p in m.parts
             )
             for m in messages
         )
@@ -122,3 +125,32 @@ def test_chat_turn_stream_preserves_text_across_tool_loop(tmp_path):
     assert "Let me greet." in assistant_msg.content
     assert "Done." in assistant_msg.content
     assert assistant_msg.tool_calls[0].tool_name == "greet"
+
+
+def _make_broken_stream():
+    """A stream function that yields once then raises."""
+    async def stream(messages, info):
+        yield "starting"
+        raise RuntimeError("model exploded")
+
+    return stream
+
+
+def test_chat_turn_stream_emits_turn_error_on_failure(tmp_path):
+    """When the agent run raises, a TurnError event is emitted before the stream ends."""
+    cfg = _test_config(tmp_path)
+    agent = Agent(FunctionModel(stream_function=_make_broken_stream()), deps_type=AlfredDeps)
+
+    session = Session(cfg)
+    deps = AlfredDeps(config=cfg, blocks=None)
+    bus = EventBus()
+    events = []
+    bus.subscribe(events.append)
+
+    with pytest.raises(Exception):
+        list(chat_turn_stream(agent, deps, session, "hi", bus=bus))
+
+    turn_errors = [e for e in events if isinstance(e, TurnError)]
+    assert len(turn_errors) == 1
+    assert turn_errors[0].session_id == session.id
+    assert "model exploded" in turn_errors[0].error
