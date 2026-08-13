@@ -9,6 +9,8 @@ chat 内斜杠命令：
 
 from __future__ import annotations
 
+import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from datetime import datetime
@@ -21,10 +23,14 @@ from rich.panel import Panel
 
 from alfred.events import (
     AssistantChunk,
+    ContextCompacted,
     EventBus,
     ToolCallEnd,
     ToolCallStart,
     ToolDenied,
+    TurnEnd,
+    TurnError,
+    TurnStart,
 )
 
 from .agent import AlfredDeps, build_agent, chat_turn_stream
@@ -36,12 +42,46 @@ from .memory.blocks import MemoryBlocks
 app = typer.Typer(help="私人管家 AI Agent", no_args_is_help=True)
 console = Console()
 
+_LOGGER_NAME = "alfred.chat"
+
 
 def _confirm(msg: str) -> bool:
     """在工作线程中请求用户确认；避开 Rich Console 以减少线程竞争。"""
     print(f"\n{'=' * 60}\n确认请求\n{'=' * 60}\n{msg}\n{'=' * 60}")
     answer = input("是否允许 [y/N]: ").strip().lower()
     return answer in ("y", "yes")
+
+
+def _setup_chat_logger(config, debug: bool = False) -> logging.Logger:
+    """配置 chat 日志：默认写入 data/logs/alfred.log，debug 时同时输出到控制台。"""
+    logger = logging.getLogger(_LOGGER_NAME)
+    if logger.handlers:
+        return logger
+
+    log_dir = config.path(config.paths.history_dir).parent / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "alfred.log"
+
+    file_handler = RotatingFileHandler(
+        log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    )
+    file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s"
+    ))
+    file_handler.setLevel(logging.DEBUG)
+    logger.addHandler(file_handler)
+
+    if debug:
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(logging.Formatter(
+            "[dim]%(asctime)s [%(levelname)s] %(message)s[/dim]"
+        ))
+        stream_handler.setLevel(logging.DEBUG)
+        logger.addHandler(stream_handler)
+
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+    return logger
 
 
 def _print_connection_result(ref: str, result: dict) -> None:
@@ -114,24 +154,30 @@ def models(
 
 
 @app.command()
-def chat(session_id: str = typer.Option(None, "--session", "-s", help="恢复指定会话")):
+def chat(
+    session_id: str = typer.Option(None, "--session", "-s", help="恢复指定会话"),
+    debug: bool = typer.Option(False, "--debug", help="启用调试日志输出到控制台"),
+):
     """开始与管家对话。"""
     config = load_config()
     blocks = MemoryBlocks(config)
     session = Session(config, session_id=session_id)
     agent = build_agent(config)
     deps = AlfredDeps(config=config, blocks=blocks, confirm=_confirm)
+    logger = _setup_chat_logger(config, debug=debug)
 
     console.print(Panel(
         f"会话 {session.id} ｜ 模型 {config.models.chat} ｜ 输入 /exit 退出，/help 查看命令",
         title="[bold]私人管家[/bold]",
     ))
+    logger.info("会话开始: %s, 模型: %s, debug: %s", session.id, config.models.chat, debug)
 
     prompt_session = PromptSession(
         "你: ",
         style=Style.from_dict({"prompt": "cyan bold"}),
     )
 
+    turn_count = 0
     while True:
         try:
             user_input = prompt_session.prompt().strip()
@@ -150,6 +196,7 @@ def chat(session_id: str = typer.Option(None, "--session", "-s", help="恢复指
             elif cmd == "/new":
                 session = Session(config)
                 console.print(f"[dim]新会话 {session.id}[/dim]")
+                logger.info("新会话: %s", session.id)
             elif cmd == "/model":
                 if not arg:
                     console.print(f"当前模型：{config.models.chat}（切换：/model provider:model）")
@@ -159,6 +206,7 @@ def chat(session_id: str = typer.Option(None, "--session", "-s", help="恢复指
                         config.models.chat = arg
                         agent = build_agent(config, arg)
                         console.print(f"[green]已切换模型：{arg}[/green]")
+                        logger.info("切换模型: %s", arg)
                     except (KeyError, ValueError) as e:
                         console.print(f"[red]{e}[/red]")
             elif cmd == "/remember":
@@ -185,34 +233,70 @@ def chat(session_id: str = typer.Option(None, "--session", "-s", help="恢复指
 
         # 分隔用户输入与助手输出
         console.print()
+        turn_count += 1
+        logger.info("第 %d 轮输入，长度: %d", turn_count, len(user_input))
 
         reply_parts: list[str] = []
+        status = console.status("[bold green]助手正在思考...[/bold green]", spinner="dots")
+        status.start()
+        status_active = True
+
+        def stop_status() -> None:
+            nonlocal status_active
+            if status_active:
+                status.stop()
+                status_active = False
+
+        first_content_received = False
+        assistant_prefix_printed = False
+
         try:
             for event in chat_turn_stream(agent, deps, session, user_input, bus=EventBus()):
+                logger.debug("事件: %s", type(event).__name__)
                 if isinstance(event, AssistantChunk):
-                    if not reply_parts:
+                    if not first_content_received:
+                        stop_status()
+                        first_content_received = True
+                    if not assistant_prefix_printed:
                         console.print("[bold green]助手：[/bold green] ", end="")
+                        assistant_prefix_printed = True
                     console.out(event.delta, end="")
                     reply_parts.append(event.delta)
                 elif isinstance(event, ToolCallStart):
+                    if not first_content_received:
+                        stop_status()
+                        first_content_received = True
                     console.print(f"[dim]🔧 {event.tool_name} ...[/dim]")
+                    logger.info("工具调用: %s, args: %s", event.tool_name, event.args)
                 elif isinstance(event, ToolCallEnd):
                     mark = "[green]✓[/green]" if not event.is_error else "[red]✗[/red]"
                     console.print(f"[dim]🔧 {event.tool_name} {mark}[/dim]")
+                    logger.info("工具结束: %s, 错误: %s", event.tool_name, event.is_error)
                 elif isinstance(event, ToolDenied):
                     console.print(f"[dim]🔧 {event.tool_name} [red]已拒绝[/red][/dim]")
+                    logger.info("工具拒绝: %s", event.tool_name)
+                elif isinstance(event, TurnError):
+                    logger.error("TurnError: %s", event.error)
         except (Exception, KeyboardInterrupt) as e:
+            stop_status()
             if isinstance(e, KeyboardInterrupt):
                 console.print("\n[dim]已中断。[/dim]")
+                logger.info("用户中断第 %d 轮", turn_count)
             else:
                 console.print(f"\n[red]出错了：{e}[/red]")
+                logger.error("第 %d 轮异常: %s", turn_count, e, exc_info=True)
             continue
+        finally:
+            stop_status()
+
         console.print()
         reply = "".join(reply_parts)
+        logger.info("第 %d 轮回复完成，长度: %d", turn_count, len(reply))
 
         # hot path 结束后，后台异步沉淀长期记忆
         longterm.add_async(config, user_input, reply)
 
+    logger.info("会话结束: %s, 总轮数: %d", session.id, turn_count)
     console.print("[dim]再见。[/dim]")
 
 
