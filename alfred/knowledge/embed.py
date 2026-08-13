@@ -13,10 +13,9 @@ import json
 import os
 import urllib.request
 from abc import ABC, abstractmethod
-from functools import lru_cache
 from typing import Any
 
-from ..config import Config
+from ..config import Config, EmbedConfig
 
 
 class Embedder(ABC):
@@ -123,14 +122,22 @@ class OpenAICompatEmbedder(Embedder):
         return [item["embedding"] for item in items]
 
 
-@lru_cache(maxsize=1)
+_cached_embed_cfg: EmbedConfig | None = None
+_cached_embedder: Embedder | None = None
+
+
 def _get_embedder(config: Config) -> Embedder:
+    global _cached_embed_cfg, _cached_embedder
     cfg = config.models.embed
-    if cfg.provider == "local":
-        return LocalEmbedder(config)
-    if cfg.provider == "openai_compat":
-        return OpenAICompatEmbedder(config)
-    raise ValueError(f"不支持的 embedding provider: {cfg.provider}")
+    if _cached_embedder is None or _cached_embed_cfg != cfg:
+        if cfg.provider == "local":
+            _cached_embedder = LocalEmbedder(config)
+        elif cfg.provider == "openai_compat":
+            _cached_embedder = OpenAICompatEmbedder(config)
+        else:
+            raise ValueError(f"不支持的 embedding provider: {cfg.provider}")
+        _cached_embed_cfg = cfg
+    return _cached_embedder
 
 
 def embed_texts(config: Config, texts: list[str]) -> list[list[float]]:
