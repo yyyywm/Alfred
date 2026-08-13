@@ -11,6 +11,7 @@ from alfred.events import (
     EventBus,
     ToolCallEnd,
     ToolCallStart,
+    ToolDenied,
     TurnEnd,
     TurnError,
     TurnStart,
@@ -154,3 +155,66 @@ def test_chat_turn_stream_emits_turn_error_on_failure(tmp_path):
     assert len(turn_errors) == 1
     assert turn_errors[0].session_id == session.id
     assert "model exploded" in turn_errors[0].error
+
+
+def _make_denied_tool_stream():
+    """Return a stream that calls a confirmation-required tool, then final text."""
+    async def stream(messages, info):
+        has_tool_return = any(
+            getattr(m, "parts", None) and any(
+                isinstance(p, ToolReturnPart) for p in m.parts
+            )
+            for m in messages
+        )
+        if has_tool_return:
+            yield "done"
+            return
+        yield {0: DeltaToolCall(name="shell", json_args='{"command":"echo hi"}', tool_call_id="tc1")}
+
+    return stream
+
+
+def test_chat_turn_stream_emits_tool_denied(tmp_path):
+    """When the user denies a tool call, emit ToolDenied and record the error."""
+    cfg = _test_config(tmp_path)
+    agent = Agent(FunctionModel(stream_function=_make_denied_tool_stream()), deps_type=AlfredDeps)
+
+    calls = []
+
+    def shell(ctx: RunContext[AlfredDeps], command: str) -> str:
+        calls.append(command)
+        return f"ran {command}"
+
+    agent.tool(_wrap_tool(shell, "shell"))
+
+    session = Session(cfg)
+    deps = AlfredDeps(config=cfg, blocks=None, confirm=lambda _msg: False)
+    bus = EventBus()
+    events = []
+    bus.subscribe(events.append)
+
+    result_events = list(chat_turn_stream(agent, deps, session, "run command", bus=bus))
+    assert result_events == events
+
+    denied = [e for e in events if isinstance(e, ToolDenied)]
+    assert len(denied) == 1
+    assert denied[0].tool_name == "shell"
+    assert denied[0].args == {"command": "echo hi"}
+    assert denied[0].tool_call_id == "tc1"
+
+    tool_ends = [e for e in events if isinstance(e, ToolCallEnd)]
+    assert len(tool_ends) == 1
+    assert tool_ends[0].is_error is True
+    assert tool_ends[0].tool_name == "shell"
+    assert tool_ends[0].tool_call_id == "tc1"
+
+    assert calls == []
+
+    assert any(isinstance(e, TurnEnd) for e in events)
+
+    assert len(session.messages) == 2
+    assistant_msg = session.messages[1]
+    assert assistant_msg.role == "assistant"
+    assert assistant_msg.tool_calls[0].tool_name == "shell"
+    assert assistant_msg.tool_calls[0].is_error is True
+    assert "done" in assistant_msg.content

@@ -36,6 +36,7 @@ class ToolCallStart(Event):
     session_id: str
     tool_name: str
     args: dict[str, Any]
+    tool_call_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,7 @@ class ToolCallEnd(Event):
     args: dict[str, Any]
     result: Any
     is_error: bool = False
+    tool_call_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,7 @@ class ToolDenied(Event):
     tool_name: str
     args: dict[str, Any]
     reason: str
+    tool_call_id: str = ""
 
 
 @dataclass(frozen=True)

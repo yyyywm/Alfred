@@ -103,7 +103,7 @@ def _wrap_tool(fn: Callable, tool_name: str) -> Callable:
         records = ctx.deps.tool_records
         records_lock = ctx.deps.tool_records_lock
 
-        bus.emit(ToolCallStart(session_id=session_id, tool_name=tool_name, args=kwargs))
+        bus.emit(ToolCallStart(session_id=session_id, tool_name=tool_name, args=kwargs, tool_call_id=ctx.tool_call_id))
 
         prompt = _confirm_prompt(tool_name, kwargs)
         if prompt is not None and not ctx.deps.confirm(prompt):
@@ -114,6 +114,7 @@ def _wrap_tool(fn: Callable, tool_name: str) -> Callable:
                     tool_name=tool_name,
                     args=kwargs,
                     reason=reason,
+                    tool_call_id=ctx.tool_call_id,
                 )
             )
             bus.emit(
@@ -123,6 +124,7 @@ def _wrap_tool(fn: Callable, tool_name: str) -> Callable:
                     args=kwargs,
                     result=reason,
                     is_error=True,
+                    tool_call_id=ctx.tool_call_id,
                 )
             )
             with records_lock:
@@ -148,6 +150,7 @@ def _wrap_tool(fn: Callable, tool_name: str) -> Callable:
                     args=kwargs,
                     result=error_text,
                     is_error=True,
+                    tool_call_id=ctx.tool_call_id,
                 )
             )
             with records_lock:
@@ -169,6 +172,7 @@ def _wrap_tool(fn: Callable, tool_name: str) -> Callable:
                 args=kwargs,
                 result=result,
                 is_error=False,
+                tool_call_id=ctx.tool_call_id,
             )
         )
         with records_lock:
