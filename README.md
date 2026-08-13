@@ -14,20 +14,39 @@ Alfred 是一个以**长期记忆**和**个人知识库**为核心的私人智�
 
 环境要求：Python 3.11+
 
-### 使用 conda（推荐，含 web 版 conda 环境）
+Alfred 的依赖声明在 `pyproject.toml` 中（包括 `pydantic-ai`、`mem0ai`、`lancedb`、`sentence-transformers`、`prompt-toolkit` 等）。`environment.yml` 只做一件事：创建 conda 环境后，通过 `pip install -e ".[dev]"` 自动安装这些依赖。
+
+### 使用 conda（推荐）
 
 ```bash
 conda env create -f environment.yml
 conda activate alfred
-cp .env.example .env   # 填入你的 API key
+cp .env.example .env   # 填入至少一个 LLM API key
+```
+
+验证安装：
+
+```bash
+alfred models    # 应该列出配置的模型，而不是报 ModuleNotFoundError
 ```
 
 ### 使用 pip（不使用 conda 时）
 
 ```bash
 pip install -e ".[dev]"
-cp .env.example .env   # 填入你的 API key
+cp .env.example .env   # 填入至少一个 LLM API key
 ```
+
+验证安装：
+
+```bash
+alfred models
+```
+
+### 常见安装问题
+
+- **报错 `ModuleNotFoundError: No module named 'alfred'`**：说明当前 Python 环境没有安装 alfred 包。在项目根目录执行 `pip install -e ".[dev]"` 即可。如果你之前在其他目录安装过，先运行 `pip uninstall alfred`，再到本项目根目录重新安装。
+- **不知道该激活哪个环境**：`conda env list` 查看环境；如果列表里没有 `alfred`，先执行 `conda env create -f environment.yml`。
 
 ## 快速开始
 
@@ -41,6 +60,13 @@ alfred memory list       # 查看长期记忆
 alfred skills            # 查看技能与规则
 ```
 
+chat 交互说明：
+
+- 输入支持行编辑：方向键移动光标、Backspace/Delete、Home/End、上下翻阅历史
+- 你的输入和 Alfred 的回复之间有空行分隔，回复前有 `助手： ` 前缀
+- 工具调用会单独成行显示（如 `🔧 memory_search ✓`）
+- 按 `Ctrl-C` 可中断当前回复，不会退出对话
+
 chat 内斜杠命令：
 
 | 命令 | 作用 |
@@ -51,6 +77,7 @@ chat 内斜杠命令：
 | `/memory` | 查看长期记忆 |
 | `/why` | 查看上一轮回答依据了哪些记忆 |
 | `/sessions` | 列出历史会话 |
+| `/status` | 检查当前模型与 embedding 连接状态 |
 | `/exit` | 退出 |
 
 ## 配置（config.yaml）

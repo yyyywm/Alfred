@@ -166,7 +166,8 @@ Alfred/
 ### CLI（`alfred/cli.py`）
 - 所有用户命令入口：`chat`、`ingest`、`feed`、`frameworks`、`consolidate`、`memory`、`skills`、`models`
 - `chat` 内支持斜杠命令：`/exit`、`/new`、`/model`、`/remember`、`/memory`、`/why`、`/sessions`、`/help`
-- 用户确认回调 `_confirm` 通过 `AlfredDeps.confirm` 注入 agent
+- `chat` 交互使用 `prompt_toolkit.PromptSession`：支持行编辑（光标移动、删除、历史）、长输入；回复前有 `助手： ` 前缀并与用户输入空行分隔；工具调用单独成行显示
+- 所有 Rich Console 输出集中在主线程渲染，避免与后台 agent 线程竞争；用户确认回调 `_confirm` 用原生 `print/input` 实现以降低线程安全风险
 
 ### Agent 内核（`alfred/agent.py`）
 - `build_agent()`：组装 Pydantic AI Agent，绑定模型、三层 system prompt、恒定工具集
@@ -211,18 +212,19 @@ Alfred/
 ## 开发约定
 
 1. **配置驱动**：`config.yaml` 是唯一模型配置入口，代码里不得硬编码模型名或 API 地址。
-2. **记忆层与知识层严格分离**：
+2. **文档同步**：每次修改功能、命令、交互逻辑或使用方法时，必须同步更新 `README.md`（用户视角）和 `AGENTS.md`（开发视角）。禁止"代码改了文档没动"。
+3. **记忆层与知识层严格分离**：
    - `alfred/memory/`：agent 对用户的认知
    - `alfred/knowledge/`：用户笔记/喂养材料
-3. **记忆写入路径固定强模型**：长期记忆抽取、consolidate 复盘必须走 `models.memory_write`；闲聊路径才允许切换模型。
-4. **用户确认强制化**：persona 修改、shell 执行、run_python 执行必须走 `deps.confirm` 用户确认，在代码层强制，不靠 prompt 约束。
-5. **System prompt 顺序不可随意调整**：静态 instructions → memory blocks → 动态层（规则/skills/日期）。
-6. **会话历史 append-only**：`history.py` 以 JSONL append-only 写入；压缩时整体重写并作废 `llm_state`。
-7. **上下文压缩纪律**：丢内容留指针，用户偏好/进行中任务最高保留优先级，工具输出超长时裁剪为引用。
-8. **记忆块版本化**：`data/memory/` 是独立 git 仓库，`human`/`persona` 每次修改自动 commit。
-9. **测试不依赖真实 LLM**：所有测试不得调用真实模型 API 或下载 embedding，只测纯逻辑。
-10. **路径相对项目根解析**：配置中的相对路径基于 `PROJECT_ROOT` 解析，`~` 自动展开。
-11. **提交必须为单一逻辑单元**：每次 commit 只能包含一个功能/修复/文档主题，禁止混提；同文件多主题改动应使用 `git add -p` 拆分，提交信息遵循 Conventional Commits。
+4. **记忆写入路径固定强模型**：长期记忆抽取、consolidate 复盘必须走 `models.memory_write`；闲聊路径才允许切换模型。
+5. **用户确认强制化**：persona 修改、shell 执行、run_python 执行必须走 `deps.confirm` 用户确认，在代码层强制，不靠 prompt 约束。
+6. **System prompt 顺序不可随意调整**：静态 instructions → memory blocks → 动态层（规则/skills/日期）。
+7. **会话历史 append-only**：`history.py` 以 JSONL append-only 写入；压缩时整体重写并作废 `llm_state`。
+8. **上下文压缩纪律**：丢内容留指针，用户偏好/进行中任务最高保留优先级，工具输出超长时裁剪为引用。
+9. **记忆块版本化**：`data/memory/` 是独立 git 仓库，`human`/`persona` 每次修改自动 commit。
+10. **测试不依赖真实 LLM**：所有测试不得调用真实模型 API 或下载 embedding，只测纯逻辑。
+11. **路径相对项目根解析**：配置中的相对路径基于 `PROJECT_ROOT` 解析，`~` 自动展开。
+12. **提交必须为单一逻辑单元**：每次 commit 只能包含一个功能/修复/文档主题，禁止混提；同文件多主题改动应使用 `git add -p` 拆分，提交信息遵循 Conventional Commits。
 
 ## 测试策略
 
@@ -286,6 +288,8 @@ data/
 - **persona 修改需要用户确认**：agent 调用 `memory_update_block(name="persona")` 时，若 `deps.confirm` 返回 False 则写入被拒绝。
 - **压缩会作废 llm_state**：`compaction.py` 蒸馏旧消息后调用 `session.rewrite()`，跨模型精确续跑回退为"摘要 + 近期消息"的种子上下文。
 - **聊天内切换模型会重建 agent**：`/model provider:model` 会调用 `build_agent(config, arg)`，历史消息以归一化 transcript 做种子上下文。
+- **`alfred` 命令报 `ModuleNotFoundError`**：说明当前 Python 环境没有安装 alfred 包，或安装时指向了其他目录。先 `pip uninstall alfred`，再到项目根目录执行 `pip install -e ".[dev]"`。
+- **Rich Console 与后台线程混用会导致输出错乱或卡死**：`chat` 的渲染必须在主线程完成，事件监听只做数据传递，不直接操作 Console。
 
 ## 部署与分发
 
