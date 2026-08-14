@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any
 
@@ -22,6 +23,8 @@ def _build_mem0(config: Config):
     import os
 
     os.environ.setdefault("MEM0_TELEMETRY", "false")  # 私人数据不上报
+    # mem0 的 keyword/BM25 等可选组件缺失时会打印 warning，屏蔽掉以免污染终端
+    logging.getLogger("mem0").setLevel(logging.ERROR)
     from mem0 import Memory
 
     _pname, provider, model_name = config.resolve(config.models.memory_write)
