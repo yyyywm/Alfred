@@ -3,7 +3,7 @@
 import time
 
 from alfred.config import Config
-from alfred.history import Session
+from alfred.history import Session, delete_session
 from alfred.memory.recall import rank_memories, render_for_prompt
 
 
@@ -74,3 +74,15 @@ def test_transcript(tmp_path):
     s.add_assistant("回答")
     t = s.transcript()
     assert "[user] 问题" in t and "[assistant] 回答" in t
+
+
+def test_delete_session(tmp_path):
+    cfg = _cfg(tmp_path)
+    s = Session(cfg)
+    s.add_user("要删除的会话")
+    assert s.file.exists()
+    assert delete_session(cfg, s.id) is True
+    assert not s.file.exists()
+    # 删除不存在的会话返回 False；路径穿越会被收敛为文件名
+    assert delete_session(cfg, s.id) is False
+    assert delete_session(cfg, "../outside") is False

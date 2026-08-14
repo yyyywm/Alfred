@@ -4,6 +4,7 @@ chat 内斜杠命令：
   /exit 退出  /new 新会话  /model <provider:model> 切换闲聊模型
   /remember <内容> 显式教学（写入 human 块）
   /memory 查看长期记忆  /why 查看上一轮用了哪些记忆
+  /sessions 列出历史会话  /load <序号或id> 加载历史会话  /delete <序号或id> 删除会话
   /status 检查当前模型与 embedding 连接
 """
 
@@ -36,7 +37,7 @@ from alfred.events import (
 
 from .agent import AlfredDeps, build_agent, chat_turn_stream
 from .config import load_config
-from .history import Session, list_sessions
+from .history import Session, delete_session, list_sessions
 from .memory import longterm
 from .memory.blocks import MemoryBlocks
 
@@ -51,6 +52,17 @@ def _confirm(msg: str) -> bool:
     print(f"\n{'=' * 60}\n确认请求\n{'=' * 60}\n{msg}\n{'=' * 60}")
     answer = input("是否允许 [y/N]: ").strip().lower()
     return answer in ("y", "yes")
+
+
+def _resolve_session_ref(config, ref: str, listed: list[tuple[str, float, int]]) -> str | None:
+    """把 /load、/delete 的参数解析为会话 id：支持列表序号或 id 前缀。"""
+    if ref.isdigit():
+        idx = int(ref) - 1
+        return listed[idx][0] if 0 <= idx < len(listed) else None
+    for sid, _mtime, _count in list_sessions(config):
+        if sid.startswith(ref):
+            return sid
+    return None
 
 
 def _setup_chat_logger(config, debug: bool = False) -> logging.Logger:
@@ -179,6 +191,7 @@ def chat(
     )
 
     turn_count = 0
+    listed_sessions: list[tuple[str, float, int]] = []
     while True:
         try:
             user_input = prompt_session.prompt().strip()
@@ -226,8 +239,44 @@ def chat(
             elif cmd == "/status":
                 _show_status(config)
             elif cmd == "/sessions":
-                for sid, mtime, n in list_sessions(config)[:10]:
-                    console.print(f"  {sid}  {datetime.fromtimestamp(mtime):%m-%d %H:%M}  {n} 条消息")
+                listed_sessions = list_sessions(config)[:10]
+                if not listed_sessions:
+                    console.print("[dim]还没有历史会话。[/dim]")
+                for i, (sid, mtime, n) in enumerate(listed_sessions, 1):
+                    current = "（当前）" if sid == session.id else ""
+                    console.print(
+                        f"  {i}. {sid}  {datetime.fromtimestamp(mtime):%m-%d %H:%M}  {n} 条消息{current}"
+                    )
+            elif cmd == "/load":
+                if not arg:
+                    console.print("用法：/load <序号或会话id>（序号见 /sessions）")
+                else:
+                    sid = _resolve_session_ref(config, arg, listed_sessions)
+                    if sid is None:
+                        console.print(f"[red]找不到会话：{arg}[/red]")
+                    elif sid == session.id:
+                        console.print("[dim]当前已经在该会话。[/dim]")
+                    else:
+                        session = Session(config, session_id=sid)
+                        console.print(
+                            f"[green]已加载会话 {sid}（{len(session.messages)} 条消息），继续之前的上下文。[/green]"
+                        )
+                        logger.info("加载会话: %s", sid)
+            elif cmd == "/delete":
+                if not arg:
+                    console.print("用法：/delete <序号或会话id>（序号见 /sessions）")
+                else:
+                    sid = _resolve_session_ref(config, arg, listed_sessions)
+                    if sid is None:
+                        console.print(f"[red]找不到会话：{arg}[/red]")
+                    elif sid == session.id:
+                        console.print("[red]不能删除当前会话。[/red]")
+                    elif _confirm(f"删除会话 {sid}？该操作不可恢复。"):
+                        if delete_session(config, sid):
+                            console.print(f"[green]已删除会话 {sid}[/green]")
+                            logger.info("删除会话: %s", sid)
+                        else:
+                            console.print(f"[red]会话不存在：{sid}[/red]")
             else:
                 console.print(f"[red]未知命令 {cmd}，输入 /help 查看。[/red]")
             continue

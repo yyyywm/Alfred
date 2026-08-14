@@ -143,3 +143,13 @@ def list_sessions(config: Config) -> list[tuple[str, float, int]]:
                 count += 1
         rows.append((f.stem, f.stat().st_mtime, count))
     return sorted(rows, key=lambda r: r[1], reverse=True)
+
+
+def delete_session(config: Config, session_id: str) -> bool:
+    """删除指定会话的历史文件。返回是否删除成功。"""
+    safe_id = Path(session_id).name  # 防路径穿越
+    f = config.path(config.paths.history_dir) / f"{safe_id}.jsonl"
+    if f.exists():
+        f.unlink()
+        return True
+    return False

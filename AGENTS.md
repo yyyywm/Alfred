@@ -165,7 +165,7 @@ Alfred/
 
 ### CLI（`alfred/cli.py`）
 - 所有用户命令入口：`chat`、`ingest`、`feed`、`frameworks`、`consolidate`、`memory`、`skills`、`models`
-- `chat` 内支持斜杠命令：`/exit`、`/new`、`/model`、`/remember`、`/memory`、`/why`、`/sessions`、`/help`
+- `chat` 内支持斜杠命令：`/exit`、`/new`、`/model`、`/remember`、`/memory`、`/why`、`/sessions`、`/load`、`/delete`、`/help`
 - `chat` 启动选项：`--session/-s` 恢复会话、`--debug` 启用调试日志输出到控制台
 - `chat` 交互使用 `prompt_toolkit.PromptSession`：支持行编辑（光标移动、删除、历史）、长输入；发送后显示 `助手正在思考...` spinner，收到首个事件后切换为 `助手： ` 前缀；工具调用单独成行显示
 - 所有 Rich Console 输出集中在主线程渲染，避免与后台 agent 线程竞争；用户确认回调 `_confirm` 用原生 `print/input` 实现以降低线程安全风险
