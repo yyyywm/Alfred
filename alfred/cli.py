@@ -19,6 +19,7 @@ import typer
 from prompt_toolkit import PromptSession
 from prompt_toolkit.styles import Style
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.panel import Panel
 
 from alfred.events import (
@@ -248,7 +249,6 @@ def chat(
                 status_active = False
 
         first_content_received = False
-        assistant_prefix_printed = False
 
         try:
             for event in chat_turn_stream(agent, deps, session, user_input, bus=EventBus()):
@@ -257,10 +257,6 @@ def chat(
                     if not first_content_received:
                         stop_status()
                         first_content_received = True
-                    if not assistant_prefix_printed:
-                        console.print("[bold green]助手：[/bold green] ", end="")
-                        assistant_prefix_printed = True
-                    console.out(event.delta, end="")
                     reply_parts.append(event.delta)
                 elif isinstance(event, ToolCallStart):
                     if not first_content_received:
@@ -275,6 +271,12 @@ def chat(
                 elif isinstance(event, ToolDenied):
                     console.print(f"[dim]🔧 {event.tool_name} [red]已拒绝[/red][/dim]")
                     logger.info("工具拒绝: %s", event.tool_name)
+                elif isinstance(event, TurnEnd):
+                    stop_status()
+                    reply = "".join(reply_parts).strip()
+                    if reply:
+                        console.print("[bold green]助手：[/bold green]")
+                        console.print(Markdown(reply))
                 elif isinstance(event, TurnError):
                     logger.error("TurnError: %s", event.error)
         except (Exception, KeyboardInterrupt) as e:
