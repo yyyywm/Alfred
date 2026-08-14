@@ -10,7 +10,9 @@ chat 内斜杠命令：
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -22,6 +24,12 @@ from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+
+# Windows 上 asyncio 默认的 ProactorEventLoop 在 Ctrl+C 退出时会报
+# "Cancelling an overlapped future failed / WinError 6"（prompt_toolkit 的已知问题）。
+# 换成 SelectorEventLoop 可避免该报错；本项目不使用 asyncio 子进程，切换无影响。
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from alfred.events import (
     AssistantChunk,
