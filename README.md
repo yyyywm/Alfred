@@ -111,6 +111,7 @@ alfred chat -s <session>   # 恢复指定会话
 | `/load <序号或id>` | 加载历史会话，继续之前的上下文 |
 | `/delete <序号或id>` | 删除会话记录（需确认） |
 | `/lessons` | 查看管家从过去中学到的教训（RefleXion 教训库） |
+| `/whoami` | 查看 Alfred 的积累状态仪表盘 |
 | `/status` | 检查当前模型与 embedding 连接状态 |
 | `/exit` 或 `/quit` | 退出 |
 
