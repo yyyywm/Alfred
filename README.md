@@ -1,20 +1,19 @@
 # Alfred —— 你的私人管家 AI
 
-了解你的一切，记得你说过的每件事，读你读过的书，陪你做决定。
+了解你的一切，记得你说过的每件事，读你读过的书，从失败中学到教训，陪你做决定。
 
 Alfred 是一个以**长期记忆**和**个人知识库**为核心的私人智能体：
 
 - **认识你**：跨会话记住你的经历、偏好、思维方式，越用越懂你
 - **读你的笔记**：索引个人笔记库，回答问题时引用出处
 - **可以喂养**：喂给它书籍文章，提炼成思维框架，成为它思考的工具
-- **会成长**：定期复盘对话，沉淀记忆、规则和技能（你确认后才入库）
-- **模型无关**：任何 OpenAI / Anthropic 兼容的 API 都能接，换模型不改代码
+- **会反思成长**：遇到失败和纠正时自动提炼教训（RefleXion 机制），下次类似场景自动激活
+- **情景记忆**：记住"上次怎么成功解决了 X 问题"，下次遇到类似情况自动召回
+- **模型无关**：任何 OpenAI / Anthropic / Gemini 兼容的 API 都能接，换模型不改代码
 
 ## 安装
 
 环境要求：Python 3.11+
-
-Alfred 的依赖声明在 `pyproject.toml` 中（包括 `pydantic-ai`、`mem0ai`、`lancedb`、`sentence-transformers`、`prompt-toolkit` 等）。`environment.yml` 只做一件事：创建 conda 环境后，通过 `pip install -e ".[dev]"` 自动安装这些依赖。
 
 ### 使用 conda（推荐）
 
@@ -24,53 +23,34 @@ conda activate alfred
 cp .env.example .env   # 填入至少一个 LLM API key
 ```
 
-验证安装：
-
-```bash
-alfred models    # 应该列出配置的模型，而不是报 ModuleNotFoundError
-```
-
-### 使用 pip（不使用 conda 时）
+### 使用 pip
 
 ```bash
 pip install -e ".[dev]"
-cp .env.example .env   # 填入至少一个 LLM API key
+cp .env.example .env
 ```
 
 验证安装：
 
 ```bash
-alfred models
+alfred models    # 应列出配置的模型，而非报 ModuleNotFoundError
 ```
-
-### 常见安装问题
-
-- **报错 `ModuleNotFoundError: No module named 'alfred'`**：说明当前 Python 环境没有安装 alfred 包。在项目根目录执行 `pip install -e ".[dev]"` 即可。如果你之前在其他目录安装过，先运行 `pip uninstall alfred`，再到本项目根目录重新安装。
-- **不知道该激活哪个环境**：`conda env list` 查看环境；如果列表里没有 `alfred`，先执行 `conda env create -f environment.yml`。
-- **`/memory` 或 `alfred memory list` 长期为空**：可能是 mem0 本地向量库初始化失败。检查 `data/vectordb/qdrant_mem0/.lock` 是否存在，存在则删除后重启； Alfred 已支持自动清理该锁文件，若仍失败请查看 `data/logs/alfred.log`。
 
 ## 快速开始
 
 ```bash
-alfred models            # 检查配置的模型与 key 可用性
-alfred chat              # 开始对话
-alfred ingest ~/notes    # 索引笔记目录（首次需下载 embedding 模型 ~600MB）
-alfred feed book.md      # 喂养一本书，提炼思维框架
-alfred consolidate       # 睡眠整理：复盘近期对话，确认后沉淀记忆
-alfred memory list       # 查看长期记忆
-alfred skills            # 查看技能与规则
+alfred models                # 检查模型与 key 配置
+alfred chat                  # 开始对话
+alfred ingest ~/notes        # 索引笔记目录（首次需下载 embedding 模型 ~600MB）
+alfred feed book.md          # 喂养一本书，提炼思维框架
+alfred consolidate           # 睡眠整理：复盘近期对话，提炼记忆与教训
+alfred memory list           # 查看长期记忆
+alfred skills                # 查看技能与规则
 ```
 
-chat 交互说明：
+## Chat 交互
 
-- 输入支持行编辑：方向键移动光标、Backspace/Delete、Home/End、上下翻阅历史
-- 发送后显示 `助手正在思考...` 状态提示，收到回复后自动切换为 `助手： ` 前缀
-- 你的输入和 Alfred 的回复之间有空行分隔，回复前有 `助手： ` 前缀
-- 工具调用会单独成行显示（如 `🔧 memory_search ✓`）
-- 按 `Ctrl-C` 可中断当前回复，不会退出对话
-- 对话过程会记录日志到 `data/logs/alfred.log`，便于排查问题
-
-chat 启动选项：
+### 启动选项
 
 ```bash
 alfred chat                # 正常对话
@@ -78,57 +58,169 @@ alfred chat --debug        # 启用调试日志，同时输出到控制台
 alfred chat -s <session>   # 恢复指定会话
 ```
 
-chat 内斜杠命令：
+### 交互行为
+
+- 输入支持行编辑：方向键移动光标、Backspace/Delete、Home/End、上下翻阅历史
+- 发送后显示 `助手正在思考...` 状态提示，收到回复后切换为 `助手：` 前缀
+- Alfred 的回复以 Markdown 渲染
+- 工具调用单独成行显示（如 `🔧 memory_search ✓`）
+- 按 `Ctrl-C` 中断当前回复，不会退出对话
+- 对话日志写入 `data/logs/alfred.log`（5MB 轮转 ×3），`--debug` 时同时输出到控制台
+
+### 斜杠命令
 
 | 命令 | 作用 |
 |---|---|
 | `/new` | 开启新会话 |
-| `/model provider:model` | 切换闲聊模型 |
-| `/remember <内容>` | 显式教学，写入用户画像 |
+| `/model <provider:model>` | 切换闲聊模型 |
+| `/remember <内容>` | 显式教学，写入用户画像（human 块） |
 | `/memory` | 查看长期记忆 |
 | `/why` | 查看上一轮回答依据了哪些记忆 |
 | `/sessions` | 列出历史会话（带序号） |
 | `/load <序号或id>` | 加载历史会话，继续之前的上下文 |
 | `/delete <序号或id>` | 删除会话记录（需确认） |
+| `/lessons` | 查看管家从过去中学到的教训（RefleXion 教训库） |
 | `/status` | 检查当前模型与 embedding 连接状态 |
-| `/exit` | 退出 |
+| `/exit` 或 `/quit` | 退出 |
+
+## 记忆系统
+
+Alfred 的记忆分三层，职责清晰：
+
+### ① 常驻记忆块（human / persona / lessons）
+
+三个 Markdown 文件，存储于 `data/memory/`，git 版本化，每次修改自动 commit，可回滚。
+
+| 块 | 内容 | 修改需确认？ |
+|---|---|---|
+| `human.md` | 管家对用户的认知（经历、偏好、思维方式） | ✅ 需确认 |
+| `persona.md` | 管家的自我设定（性格、原则、行为准则） | ✅ 需确认 |
+| `lessons.md` | 从过去失败/纠正中提炼的教训（追加型，自动激活） | ❌ 自动写入 |
+
+- 每个块有字符上限（默认 2000 字符，lessons 4000 字符），超过上限时会拒绝写入或自动压缩
+- 使用 `/remember` 可直接向 human 块追加一条事实
+- 使用 `alfred memory history human` 或 `alfred memory history persona` 查看版本历史
+
+### ② 长期记忆（mem0）
+
+跨会话的事实沉淀。每轮对话结束后自动抽取，存入本地 Qdrant 向量库。
+
+- 过滤琐碎消息（"好的"、"嗯"、"哈哈"等短回复）不写入
+- 支持相关性 + 近因度混合排序，每轮召回硬预算 10 条
+- `alfred memory list` 查看全部，`alfred memory delete <id>` 删除指定记忆
+
+### ③ 情景记忆（episodes）
+
+记录"成功的案例"——场景、思路、行动、结果四元组，存 LanceDB。Alfred 遇到类似场景时自动检索，借鉴之前的做法。
+
+### RefleXion 教训机制
+
+遇到工具调用失败、用户纠正、操作被拒绝时，Alfred 会自动（或经 `alfred consolidate` 复盘时）提炼为一条教训，追加到 `lessons.md`。下次遇到类似场景时，教训自动注入系统 prompt，指导决策。
+
+使用 `/lessons` 查看所有教训，支持按类别过滤（如 `/lessons code-debug`）。
+
+## 知识系统
+
+### 索引笔记
+
+```bash
+alfred ingest ~/notes
+```
+
+- 增量索引 Markdown 目录，文件 hash 判断变更，相同文件不会重复索引
+- 按标题层级切分片段，保留标题路径前缀
+- 查询时自动引用出处
+
+### 喂养书籍/文章
+
+```bash
+alfred feed book.md
+```
+
+- 分段通读，提炼思维框架卡片（含名称、来源、正文、标签）
+- 入库前四要素校验，不合格不入库
+- 用 `alfred frameworks <query>` 检索已提炼的框架
 
 ## 配置（config.yaml）
 
 ```yaml
+# 声明式 provider 配置
 providers:
-  kimi-for-coding:           # 任何 Anthropic / OpenAI 兼容端点都能接
+  deepseek:
+    type: openai_compat
+    base_url: https://api.deepseek.com
+    env_key: DEEPSEEK_API_KEY
+    models: [deepseek-chat, deepseek-reasoner]
+  kimi-for-coding:
     type: anthropic
     base_url: https://api.kimi.com/coding
-    env_key: KIMI_API_KEY    # key 从 .env 读取，不写在这里
-    models: [k3]
+    env_key: KIMI_API_KEY
+    models: [k3, k2p5]
 
 models:
-  chat: kimi-for-coding:k3          # 闲聊路径：对话中可用 /model 自由切
-  memory_write: kimi-for-coding:k3  # 记忆写入路径：固定强模型，质量敏感
+  chat: deepseek:deepseek-chat          # 闲聊模型，对话中 /model 自由切
+  memory_write: kimi-for-coding:k3       # 记忆写入路径：固定强模型，质量敏感
   embed:
-    name: Qwen/Qwen3-Embedding-0.6B # 本地 embedding：选定后不要换（换=重建索引）
+    provider: local                      # local（本地 sentence-transformers）或 openai_compat（云端 API）
+    name: Qwen/Qwen3-Embedding-0.6B
+    # 当 provider: openai_compat 时启用：
+    # base_url: https://api.siliconflow.cn/v1
+    # env_key: SILICONFLOW_API_KEY
+
+memory:
+  dir: data/memory
+  block_char_limit: 2000
+  recall_budget: 10
+  recency_half_life_days: 30
+  provider: local                        # 记忆客户端 provider（当前仅 local）
+  default_user_id: owner                 # 默认用户 id，多 agent 共享时用于隔离
+
+paths:
+  history_dir: data/history
+  vectordb_dir: data/vectordb
+  skills_dirs: [skills, ~/.config/alfred/skills]
+  rules_dirs: [rules, ~/.config/alfred/rules]
 ```
 
-## 扩展能力
+### 关键配置原则
 
-- **加技能**：在 `skills/<名字>/SKILL.md` 写 frontmatter（name/description）+ 流程正文，
-  Alfred 在任务匹配时自动激活
-- **加规则**：在 `rules/*.md` 写 frontmatter（`alwaysApply` 常驻 / `description`
-  按需召回 / `globs` 按文件匹配）
-- **自我成长**：日常对话自动沉淀长期记忆；定期 `alfred consolidate` 复盘产出
-  记忆/规则/技能草稿，确认后入库（git 版本化，可回滚）
+- **模型无关**：代码里不硬编码任何模型名或 API 地址，全部走 `config.yaml`
+- **换 embedding 模型必须重建索引**：`models.embed.name` 一旦确定不要轻易更换，否则笔记/框架/情景记忆向量库需全量重建
+- **memory_write 固定强模型**：记忆抽取和复盘质量敏感，不要用便宜模型
+
+## 扩展机制
+
+### Skills（技能）
+
+在 `skills/<name>/SKILL.md` 创建技能文件，含 YAML frontmatter（`name`、`description`）+ Markdown 正文。
+
+- 启动时只注入 name+description 到索引，不加载全文
+- agent 判定任务匹配后自动用 `file_read` 读取正文
+- 扫描目录由 `paths.skills_dirs` 控制
+
+### Rules（规则）
+
+在 `rules/*.md` 创建规则文件，含 YAML frontmatter。
+
+- `alwaysApply: true`：常驻注入系统 prompt
+- `description`：进入可召回索引，agent 按需读取
+- 扫描目录由 `paths.rules_dirs` 控制
 
 ## 隐私
 
-所有记忆、笔记索引、会话历史全部存储在本地 `data/` 目录，唯一的对外流量是你配置的
-LLM API。记忆完全透明可审计：`alfred memory list/delete`、对话内 `/why`。
+- 所有记忆、笔记索引、会话历史存储在本地 `data/` 目录
+- mem0 telemetry 已关闭（`MEM0_TELEMETRY=false`）
+- API key 通过 `.env` + `env_key` 引用，不写入配置文件
+- Shell / Python 执行需要用户确认
+- 单轮工具调用硬上限 20 次，防止 agent 失控
 
 ## 测试
 
 ```bash
 python -m pytest tests/ -q
 ```
+
+测试覆盖配置解析、记忆块、Markdown 切分、长期记忆过滤、召回排序、会话历史持久化、skills/rules 扫描、agent 循环等纯逻辑。不依赖真实 LLM 调用或 embedding 下载。
 
 ## License
 

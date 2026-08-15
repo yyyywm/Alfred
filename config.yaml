@@ -38,12 +38,11 @@ models:
   memory_write: kimi-for-coding:k3
   # embedding：本地模型或 OpenAI 兼容 API，选定后不要换（换 = 全量重建索引）
   embed:
-    provider: openai_compat     # local 或 openai_compat
+    provider: openai_compat     # local（本地 sentence-transformers）或 openai_compat（云端 API）
     name: BAAI/bge-large-zh-v1.5
     device: null                 # null=自动；可填 cpu / mps / cuda（仅 local）
     # hf_endpoint: https://hf-mirror.com  # 国内下载镜像，默认走 huggingface.co（仅 local）
     # local_dir: null             # 模型已下载到本地目录时填这里，跳过远程下载（仅 local）
-
     # --- 当 provider: openai_compat 时启用 ---
     base_url: https://api.siliconflow.cn/v1
     env_key: SILICONFLOW_API_KEY  # 从 .env 读取 key
@@ -52,10 +51,12 @@ models:
     # dims: 1024                 # 向量维度，用于 mem0/Qdrant；不填默认 1024（换模型务必改为实际维度）
 
 memory:
-  dir: data/memory          # human.md / persona.md（独立 git 仓库版本化）
+  dir: data/memory          # human.md / persona.md / lessons.md（独立 git 仓库版本化）
   block_char_limit: 2000    # 每个 core block 的字符上限（最小高信号原则）
   recall_budget: 10         # 每轮记忆召回硬预算（context rot 实证：宁少勿滥）
   recency_half_life_days: 30
+  provider: local           # 记忆客户端 provider（当前仅 local，未来可加云端）
+  default_user_id: owner    # 默认用户 id，多 agent 共享记忆基础设施时用于租户隔离
 
 paths:
   history_dir: data/history
