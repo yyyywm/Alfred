@@ -6,6 +6,7 @@ chat 内斜杠命令：
   /memory 查看长期记忆  /why 查看上一轮用了哪些记忆
   /sessions 列出历史会话  /load <序号或id> 加载历史会话  /delete <序号或id> 删除会话
   /lessons 查看管家从过去中学到的教训（RefleXion 教训库）
+  /whoami 查看 Alfred 的积累状态（记忆/教训/情景/笔记/框架）
   /status 检查当前模型与 embedding 连接
 """
 
@@ -200,6 +201,8 @@ def chat(
     )
 
     turn_count = 0
+    # 每隔 N 轮对话，在回复后提示用户考虑复盘（让巩固动作浮出水面）
+    _CONSOLIDATE_REMINDER_EVERY = 10
     listed_sessions: list[tuple[str, float, int]] = []
     while True:
         try:
@@ -247,6 +250,8 @@ def chat(
                     console.print("[dim]上一轮没有使用长期记忆。[/dim]")
             elif cmd == "/status":
                 _show_status(config)
+            elif cmd == "/whoami":
+                _show_whoami(config, blocks)
             elif cmd == "/lessons":
                 _show_lessons(config, arg)
             elif cmd == "/sessions":
@@ -389,6 +394,13 @@ def chat(
         # hot path 结束后，后台异步沉淀长期记忆
         longterm.add_async(config, user_input, reply)
 
+        # 每 N 轮提示用户考虑复盘（不强制，只是把动作浮出水面）
+        if turn_count % _CONSOLIDATE_REMINDER_EVERY == 0:
+            console.print(
+                f"[dim]💭 我们已经聊了 {turn_count} 轮，"
+                "要不要运行 alfred consolidate 让管家复盘一下？[/dim]"
+            )
+
     logger.info("会话结束: %s, 总轮数: %d", session.id, turn_count)
     console.print("[dim]再见。[/dim]")
 
@@ -462,6 +474,80 @@ def _show_lessons(config, arg=None) -> None:
         cat = l.get("category", "?")
         title = l.get("title", "")
         console.print("  {}. [dim][{}][/dim] {}".format(i, cat, title))
+
+
+def _show_whoami(config, blocks: MemoryBlocks) -> None:
+    """显示 Alfred 的积累状态：记忆/教训/情景/笔记/框架。
+
+    这是用户的长期资产仪表盘——让"Alfred 在成长"这件事看得见。
+    """
+    from .memory import longterm
+    from .memory.lessons import LessonsBlock
+
+    # ① 常驻记忆块
+    human_text = blocks.read("human").strip()
+    persona_text = blocks.read("persona").strip()
+    human_nonempty = "human" if human_text and "还没有关于用户" not in human_text else "空"
+    persona_nonempty = "persona" if persona_text and "还没有" not in persona_text else "空"
+
+    # ② 长期记忆
+    memories = longterm.list_all(config)
+    memory_count = len(memories)
+
+    # ③ 教训
+    lb = LessonsBlock(config)
+    lessons = lb.list_lessons()
+    lesson_count = len(lessons)
+
+    # ④ 情景记忆（LanceDB episodes 表）
+    episode_count = 0
+    try:
+        from .knowledge import store as knowledge_store
+        db = knowledge_store.get_db(config)
+        if "episodes" in db.table_names():
+            episode_count = len(db.open_table("episodes").to_list())
+    except Exception:
+        episode_count = 0
+
+    # ⑤ 笔记索引（LanceDB notes 表）
+    notes_count = 0
+    try:
+        db = knowledge_store.get_db(config)
+        if "notes" in db.table_names():
+            notes_count = len(db.open_table("notes").to_list())
+    except Exception:
+        notes_count = 0
+
+    # ⑥ 思维框架（LanceDB frameworks 表）
+    framework_count = 0
+    try:
+        db = knowledge_store.get_db(config)
+        if "frameworks" in db.table_names():
+            framework_count = len(db.open_table("frameworks").to_list())
+    except Exception:
+        framework_count = 0
+
+    lines = [
+        f"[bold]常驻记忆块[/bold]",
+        f"  human   {'[green]✓[/green] 已建立' if human_nonempty == 'human' else '[dim]空[/dim]'}",
+        f"  persona {'[green]✓[/green] 已建立' if persona_nonempty == 'persona' else '[dim]空[/dim]'}",
+        "",
+        f"[bold]长期记忆[/bold]    {memory_count} 条",
+        f"[bold]RefleXion 教训[/bold]  {lesson_count} 条",
+        f"[bold]情景记忆[/bold]    {episode_count} 条",
+        f"[bold]笔记索引[/bold]    {notes_count} 个片段",
+        f"[bold]思维框架[/bold]    {framework_count} 张卡片",
+    ]
+
+    total = memory_count + lesson_count + episode_count + notes_count + framework_count
+    if total > 0:
+        lines.append("")
+        lines.append(f"[dim]Alfred 一共积累了 {total} 条数据。[/dim]")
+    else:
+        lines.append("")
+        lines.append("[dim]Alfred 刚起步，还没什么积累。多聊、多喂书、多复盘，数据会自己长出来。[/dim]")
+
+    console.print(Panel("\n".join(lines), title="[bold]Alfred 状态[/bold]", border_style="green"))
 
 
 @app.command()
