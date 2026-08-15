@@ -59,6 +59,15 @@ class ToolDenied(Event):
 
 
 @dataclass(frozen=True)
+class SkillSuggested(Event):
+    """前置匹配的 skill 未被 agent 主动读取时触发——软提示，不强制。"""
+    session_id: str
+    name: str
+    description: str
+    file: str
+
+
+@dataclass(frozen=True)
 class TurnEnd(Event):
     session_id: str
     usage: dict[str, Any] | None

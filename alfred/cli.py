@@ -43,6 +43,7 @@ from alfred.events import (
     TurnEnd,
     TurnError,
     TurnStart,
+    SkillSuggested,
 )
 
 from .agent import AlfredDeps, build_agent, chat_turn_stream
@@ -396,6 +397,11 @@ def chat(
                     elif reply:
                         console.print("[bold green]助手：[/bold green]")
                         console.print(Markdown(reply))
+                elif isinstance(event, SkillSuggested):
+                    console.print(
+                        f"[dim]💡 这个任务可能用到技能「{event.name}」："
+                        f"{event.description}[/dim]"
+                    )
                 elif isinstance(event, TurnError):
                     logger.error("TurnError: %s", event.error)
         except (Exception, KeyboardInterrupt) as e:

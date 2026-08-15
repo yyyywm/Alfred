@@ -33,6 +33,7 @@ from .events import (
     ContextCompacted,
     Event,
     EventBus,
+    SkillSuggested,
     ToolCallEnd,
     ToolCallStart,
     ToolDenied,
@@ -45,7 +46,12 @@ from .llm import build_model
 from .memory import recall
 from .memory.blocks import MemoryBlocks
 from .rules.loader import render_rules, scan_rules
-from .skills.loader import render_skills_index, scan_skills
+from .skills.loader import (
+    match_skills,
+    render_injected_skills,
+    render_skills_index,
+    scan_skills,
+)
 
 # ── ① 静态层：行为准则（永不变化，固定在 prompt 最前）────────────────
 
@@ -83,6 +89,12 @@ class AlfredDeps:
     # 预加载缓存：技能索引 + 教训文本（build_agent 时一次性读好，避免每轮 I/O）
     skill_index: str = ""
     lessons_text: str = ""
+    # 本轮匹配 skill 的全文注入文本（由 chat_turn_stream 设置）
+    injected_skills_text: str = ""
+    # 本轮匹配的 skill 名称集合（后置提醒用）
+    matched_skills: list[str] = field(default_factory=list)
+    # 本轮已被 file_read 读取的 skill 名称集合（防重复提醒）
+    used_skills: list[str] = field(default_factory=list)
 
 
 # 单轮工具调用硬上限
@@ -249,7 +261,8 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
         human = blocks.read("human") if blocks is not None else ""
         return f"# 你对用户的认知（human）\n{human}"
 
-    # ── ④ 静态缓存：技能索引 + 教训（会话内不变，build_agent 时一次读好）────
+    # ── ④ 静态缓存：技能索引（会话内不变，build_agent 时一次读好）────
+    # ⑤ 动态缓存：匹配 skill 全文（每轮基于用户输入重新匹配）
 
     @agent.system_prompt
     def inject_skills(ctx: RunContext[AlfredDeps]) -> str:
@@ -258,6 +271,11 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
     @agent.system_prompt
     def inject_lessons(ctx: RunContext[AlfredDeps]) -> str:
         return ctx.deps.lessons_text
+
+    @agent.system_prompt
+    def inject_matched_skills(ctx: RunContext[AlfredDeps]) -> str:
+        """当前任务匹配的 skill 全文注入（LLM 从真实流程文本推理）。"""
+        return ctx.deps.injected_skills_text
 
     # ── ③ 动态层：规则、日期（易变信息放最后）──────────────────
 
@@ -342,7 +360,13 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
         except UnicodeDecodeError:
             return f"错误：{p} 不是文本文件，无法读取。"
         if len(text) > 20_000:
-            return text[:20_000] + f"\n\n[已截断：完整文件 {len(text)} 字符，路径 {p}]"
+            full_len = len(text)
+            text = text[:20_000] + f"\n\n[已截断：完整文件 {full_len} 字符，路径 {p}]"
+        # 记录已读的 skill：后置 SkillSuggested 兜底时排除已读的
+        if p.name == "SKILL.md":
+            parent = p.parent.name
+            if parent in ctx.deps.matched_skills and parent not in ctx.deps.used_skills:
+                ctx.deps.used_skills.append(parent)
         return text
 
     def shell(ctx: RunContext[AlfredDeps], command: str) -> str:
@@ -444,6 +468,12 @@ def chat_turn_stream(
     queue: Queue[Event | None] = Queue()
     bus.subscribe(queue.put)
 
+    # 主动匹配 skill：基于用户输入关键词匹配，匹配的全文注入 prompt
+    all_skills = scan_skills(config)
+    matched = match_skills(all_skills, user_input)
+    matched_names = [s.name for s in matched]
+    injected_skills_text = render_injected_skills(matched)
+
     turn_deps = AlfredDeps(
         config=deps.config,
         blocks=deps.blocks,
@@ -453,6 +483,10 @@ def chat_turn_stream(
         bus=bus,
         tool_records=[],
         code_patch_count=0,
+        skill_index=deps.skill_index,
+        lessons_text=deps.lessons_text,
+        matched_skills=matched_names,
+        injected_skills_text=injected_skills_text,
     )
 
     error_holder: list[Exception] = []
@@ -513,6 +547,20 @@ def chat_turn_stream(
                     usage=asdict(final_result.usage) if final_result.usage else None,
                 )
             )
+
+            # 后置提醒：匹配的 skill 未被 agent 主动读取时，发 SkillSuggested 软提示
+            if matched_names:
+                unused = [n for n in matched_names if n not in turn_deps.used_skills]
+                for s in matched:
+                    if s.name in unused:
+                        bus.emit(
+                            SkillSuggested(
+                                session_id=session.id,
+                                name=s.name,
+                                description=s.description,
+                                file=str(s.path),
+                            )
+                        )
         except Exception as exc:
             error_holder.append(exc)
             bus.emit(TurnError(session_id=session.id, error=str(exc)))
