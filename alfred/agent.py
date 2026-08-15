@@ -280,6 +280,32 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
             lines.append(f"【出处：{r['source']}】\n{r['text']}")
         return "\n\n---\n\n".join(lines)
 
+    def episodes_search(ctx: RunContext[AlfredDeps], query: str, limit: int = 3) -> str:
+        """检索管家过去的成功经验（情景记忆）。
+        适用于用户问「你之前是怎么处理 X 的」「上次遇到类似情况怎么做的」，
+        或者你正在面对一个和过去类似的场景、希望借鉴之前的做法。"""
+        from .memory import episodic
+
+        try:
+            results = episodic.search_episodes(ctx.deps.config, query, limit=limit)
+        except Exception as e:
+            return f"情景记忆库暂不可用（{e}）。"
+        if not results:
+            return "情景记忆库中暂时没有匹配的成功案例。"
+        lines = []
+        for r in results:
+            situation = r.get("situation", "")
+            thoughts = r.get("thoughts", "")
+            action = r.get("action", "")
+            result = r.get("result", "")
+            lines.append(
+                f"**场景**：{situation}\n"
+                f"**思路**：{thoughts}\n"
+                f"**行动**：{action}\n"
+                f"**结果**：{result}"
+            )
+        return "\n\n---\n\n".join(lines)
+
     def file_read(ctx: RunContext[AlfredDeps], path: str) -> str:
         """读取一个文本文件。用于激活技能（读取 SKILL.md）、读取规则文件、
         查看用户指定的文件等。"""
@@ -324,6 +350,7 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
     agent.tool(_wrap_tool(memory_search, "memory_search"))
     agent.tool(_wrap_tool(memory_update_block, "memory_update_block"))
     agent.tool(_wrap_tool(notes_search, "notes_search"))
+    agent.tool(_wrap_tool(episodes_search, "episodes_search"))
     agent.tool(_wrap_tool(file_read, "file_read"))
     agent.tool(_wrap_tool(shell, "shell"))
     agent.tool(_wrap_tool(run_python, "run_python"))
