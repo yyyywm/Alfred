@@ -19,6 +19,14 @@ import sys
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
+
+class ToolDeniedError(Exception):
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+class ToolLimitExceeded(Exception):
+    pass
 from datetime import datetime
 from pathlib import Path
 from queue import Queue
@@ -101,6 +109,38 @@ class AlfredDeps:
 _MAX_TOOL_CALLS_PER_TURN = 20
 
 
+@dataclass(frozen=True)
+class ToolPipelineConfig:
+    timeout_s: int = 60
+    result_max_chars: int = 5_000
+    truncate_suffix: str = "\n[输出已截断]"
+
+
+class ToolExecutionPipeline:
+    def __init__(self, config: ToolPipelineConfig):
+        self.config = config
+
+    def pre_check(self, ctx) -> None:
+        if ctx.deps.tool_call_count >= _MAX_TOOL_CALLS_PER_TURN:
+            raise ToolLimitExceeded
+
+    def confirm_gate(self, ctx, tool_name: str, kwargs: dict) -> None:
+        prompt = _confirm_prompt(tool_name, kwargs)
+        if prompt is not None and not ctx.deps.confirm(prompt):
+            raise ToolDeniedError("用户拒绝了该操作。")
+
+    def execute_body(self, fn, ctx, kwargs) -> str:
+        return fn(ctx, **kwargs)
+
+    def post_normalize(self, result: str) -> str:
+        if len(result) > self.config.result_max_chars:
+            return result[:self.config.result_max_chars] + self.config.truncate_suffix
+        return result
+
+
+_default_pipeline = ToolExecutionPipeline(ToolPipelineConfig())
+
+
 def _confirm_prompt(tool_name: str, args: dict) -> str | None:
     """Return a user-facing confirmation prompt, or None if no confirmation needed."""
     if tool_name == "shell":
@@ -139,102 +179,77 @@ def _confirm_prompt(tool_name: str, args: dict) -> str | None:
 
 
 def _wrap_tool(fn: Callable, tool_name: str) -> Callable:
-    """Wrap a raw tool so it emits lifecycle events and handles confirmation uniformly."""
+    """Wrap a raw tool: lifecycle events + confirmation + pipeline execution."""
 
     @functools.wraps(fn)
     def wrapper(ctx: RunContext[AlfredDeps], **kwargs):
-        # 单轮工具调用上限
-        if ctx.deps.tool_call_count >= _MAX_TOOL_CALLS_PER_TURN:
-            return f"错误：本轮工具调用已达上限 {_MAX_TOOL_CALLS_PER_TURN}，请精简思路后重试。"
-        ctx.deps.tool_call_count += 1
         session_id = ctx.deps.session_id
         bus = ctx.deps.bus
         records = ctx.deps.tool_records
         records_lock = ctx.deps.tool_records_lock
 
+        try:
+            _default_pipeline.pre_check(ctx)
+        except ToolLimitExceeded:
+            return (
+                f"错误：本轮工具调用已达上限 {_MAX_TOOL_CALLS_PER_TURN}，"
+                f"请精简思路后重试。"
+            )
+
+        ctx.deps.tool_call_count += 1
         bus.emit(ToolCallStart(session_id=session_id, tool_name=tool_name, args=kwargs, tool_call_id=ctx.tool_call_id))
 
-        prompt = _confirm_prompt(tool_name, kwargs)
-        if prompt is not None and not ctx.deps.confirm(prompt):
-            reason = "用户拒绝了该操作。"
-            bus.emit(
-                ToolDenied(
-                    session_id=session_id,
-                    tool_name=tool_name,
-                    args=kwargs,
-                    reason=reason,
-                    tool_call_id=ctx.tool_call_id,
-                )
-            )
-            bus.emit(
-                ToolCallEnd(
-                    session_id=session_id,
-                    tool_name=tool_name,
-                    args=kwargs,
-                    result=reason,
-                    is_error=True,
-                    tool_call_id=ctx.tool_call_id,
-                )
-            )
+        try:
+            _default_pipeline.confirm_gate(ctx, tool_name, kwargs)
+        except ToolDeniedError as exc:
+            reason = exc.reason if exc.reason else "用户拒绝了该操作。"
+            bus.emit(ToolDenied(
+                session_id=session_id, tool_name=tool_name,
+                args=kwargs, reason=reason, tool_call_id=ctx.tool_call_id
+            ))
+            bus.emit(ToolCallEnd(
+                session_id=session_id, tool_name=tool_name,
+                args=kwargs, result=reason, is_error=True,
+                tool_call_id=ctx.tool_call_id
+            ))
             with records_lock:
-                records.append(
-                    ToolCallRecord(
-                        tool_name=tool_name,
-                        args=kwargs,
-                        result=reason,
-                        is_error=True,
-                        tool_call_id=ctx.tool_call_id,
-                    )
-                )
+                records.append(ToolCallRecord(
+                    tool_name=tool_name, args=kwargs, result=reason,
+                    is_error=True, tool_call_id=ctx.tool_call_id
+                ))
             return reason
 
         try:
-            result = fn(ctx, **kwargs)
+            result = _default_pipeline.execute_body(fn, ctx, kwargs)
         except Exception as exc:
             error_text = str(exc)
-            bus.emit(
-                ToolCallEnd(
-                    session_id=session_id,
-                    tool_name=tool_name,
-                    args=kwargs,
-                    result=error_text,
-                    is_error=True,
-                    tool_call_id=ctx.tool_call_id,
-                )
-            )
+            bus.emit(ToolCallEnd(
+                session_id=session_id, tool_name=tool_name,
+                args=kwargs, result=error_text, is_error=True,
+                tool_call_id=ctx.tool_call_id
+            ))
             with records_lock:
-                records.append(
-                    ToolCallRecord(
-                        tool_name=tool_name,
-                        args=kwargs,
-                        result=error_text[:5000],
-                        is_error=True,
-                        tool_call_id=ctx.tool_call_id,
-                    )
-                )
+                records.append(ToolCallRecord(
+                    tool_name=tool_name, args=kwargs,
+                    result=error_text[:5000], is_error=True,
+                    tool_call_id=ctx.tool_call_id
+                ))
             return error_text
 
-        bus.emit(
-            ToolCallEnd(
-                session_id=session_id,
-                tool_name=tool_name,
-                args=kwargs,
-                result=result,
-                is_error=False,
-                tool_call_id=ctx.tool_call_id,
-            )
-        )
+        normalized = _default_pipeline.post_normalize(result)
+
+        bus.emit(ToolCallEnd(
+            session_id=session_id, tool_name=tool_name,
+            args=kwargs, result=normalized, is_error=False,
+            tool_call_id=ctx.tool_call_id
+        ))
         with records_lock:
-            records.append(
-                ToolCallRecord(
-                    tool_name=tool_name,
-                    args=kwargs,
-                    result=str(result)[:5000],
-                    is_error=False,
-                    tool_call_id=ctx.tool_call_id,
-                )
-            )
-        return result
+            records.append(ToolCallRecord(
+                tool_name=tool_name, args=kwargs,
+                result=str(normalized)[:5000], is_error=False,
+                tool_call_id=ctx.tool_call_id
+            ))
+        return normalized
 
     return wrapper
 
