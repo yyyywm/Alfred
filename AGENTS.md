@@ -12,6 +12,7 @@
 - **喂养学习**：通读书籍/文章，提炼成思维框架卡片入库
 - **情景记忆**：记录成功经验四元组（场景/思路/行动/结果），类似场景自动召回
 - **RefleXion 教训机制**：从工具失败/用户纠正中提炼教训，下次类似场景自动激活
+- **自举进化**：`code_patch` 工具允许在人类监督下修改自身源代码（CodeAct + SWE-bench）
 - **自我成长**：定期 `consolidate` 复盘对话，沉淀记忆、规则、教训草稿
 - **模型无关**：通过声明式 provider 配置接入任意 OpenAI / Anthropic / Gemini / 本地兼容端点
 
@@ -94,6 +95,7 @@ Alfred/
 │   ├── events.py           # 事件总线： TurnStart/AssistantChunk/ToolCall*/TurnEnd 等
 │   ├── history.py          # 会话历史 JSONL 归一化持久化
 │   ├── compaction.py       # 上下文压缩：丢内容留指针 + 偏好优先
+│   ├── codewriting.py      # 自举进化：code_patch 三重门禁（路径/语法/测试）
 │   │
 │   ├── memory/             # 记忆层（agent 对用户的认知）
 │   │   ├── protocols.py    # MemoryClient / EmbeddingClient 协议接口
@@ -199,7 +201,7 @@ Alfred/
 3. 半动态层：`lessons` 块（`inject_lessons`）—— RefleXion 教训，随对话积累自动更新
 4. 动态层：常驻规则 + 可召回规则索引 + skills 索引 + 当前日期（`inject_rules`、`inject_skills`、`inject_date`）
 
-**恒定工具集（`agent.py` 中注册，共 7 个）：**
+**恒定工具集（`agent.py` 中注册，共 8 个）：**
 - `memory_search`：长期记忆召回（混合相关性 + 近因排序）
 - `memory_update_block`：更新 human/persona 块（human 和 persona 修改均需用户确认）
 - `notes_search`：笔记 RAG
@@ -207,6 +209,15 @@ Alfred/
 - `file_read`：读取技能/规则/任意文本文件
 - `shell`：执行 shell 命令（需用户确认）
 - `run_python`：执行 Python 代码（需用户确认）
+- `code_patch`：自举进化工具，精确替换源代码中的一段文本（需用户确认，三重门禁，单轮最多一次）
+
+### 自举进化（`alfred/codewriting.py`）
+
+- `code_patch(relative_path, old_string, new_string)`：agent 修改自身源代码的工具
+- **三重门禁**：路径门禁（只允许 `alfred/` 和 `config.yaml`）→ 语法门禁（`py_compile`）→ 测试门禁（`pytest`），任一失败自动回滚
+- **理论依据**：CodeAct (Wang et al., ICML 2024, arXiv:2402.01030) 的代码即动作空间 + SWE-bench (Jimenez et al., 2023) 的 patch→测试验证范式
+- **约束**：人类是进化方向决策者，agent 不能自行决定"该改什么"；单轮最多一次调用；`tests/` 不可写（防止 agent 自证清白）
+- **用户确认**：`_confirm_prompt` 展示旧代码和新代码预览，用户拒绝则写入被拒绝
 
 ### 记忆层（`alfred/memory/`）
 
