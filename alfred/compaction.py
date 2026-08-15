@@ -68,7 +68,7 @@ def maybe_compact(config: Config, session: Session) -> str | None:
         return None
 
     transcript = "\n".join(
-        f"[{m.role}{'/' + m.name if m.name else ''}] {m.content[:1000]}" for m in old
+        f"[{m.role}{'/' + m.name if m.name else ''}] {m.content}" for m in old
     )
     agent = Agent(build_model(config, config.models.memory_write),
                   instructions=DISTILL_INSTRUCTIONS)
