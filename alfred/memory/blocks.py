@@ -12,8 +12,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import git
+import logging
 
 from ..config import Config
+
+logger = logging.getLogger(__name__)
 
 HUMAN_TEMPLATE = """# Human Block —— 我对用户的认知
 # 由管家在与用户的相处中持续更新。上限 {limit} 字符，只保留高信号事实。
@@ -80,10 +83,10 @@ class MemoryBlocks:
             return "内容无变化，未写入。"
         path.write_text(content, encoding="utf-8")
         msg = f"update {name} block" + (f": {reason}" if reason else "")
-        self._commit(msg)
+        self._commit(msg, label=name)
         return f"{name} 块已更新（{len(content)}/{self.limit} 字符），已提交版本记录。"
 
-    def _commit(self, message: str, allow_empty: bool = True) -> None:
+    def _commit(self, message: str, allow_empty: bool = True, label: str = "") -> None:
         repo = self._repo
         md_files = [f.name for f in self.dir.glob("*.md")]
         if not md_files:
@@ -92,8 +95,8 @@ class MemoryBlocks:
         if repo.is_dirty(index=True, working_tree=True) or allow_empty:
             try:
                 repo.index.commit(message)
-            except git.exc.GitCommandError:
-                pass  # 无变更时忽略
+            except git.exc.GitCommandError as exc:
+                logger.warning("记忆块 git commit 失败 [%s]：%s", label or "?", exc)
 
     def history(self, name: str | None = None, max_entries: int = 20) -> list[str]:
         """返回版本历史（每条一行：hash 摘要 时间）。"""
