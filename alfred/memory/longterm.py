@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from typing import Any
 
@@ -126,13 +127,69 @@ def get_memory(config: Config):
 
 USER_ID = "owner"  # 单用户私人管家，固定 user id
 
+# 过滤：低于该字符数的消息被视为琐碎（纯寒暄 / 语气词）
+_MESSAGE_MIN_CHARS = 20
+# 明显琐碎的用户消息（忽略大小写 / 空白）
+_TRIVIAL_USER_PATTERNS = (
+    "^是$",
+    "^对$",
+    "^嗯",
+    "^好$",
+    "^好的$",
+    "^ok",
+    "^ok了",
+    "^谢谢",
+    "^thanks",
+    "^yeah",
+    "^yep",
+    "^nope",
+    "^哈哈",
+    "^haha",
+    "^hehe",
+)
+# 明显琐碎的助手消息
+_TRIVIAL_ASSISTANT_PATTERNS = (
+    "^好",
+    "^收到",
+    "^明白了",
+    "^知道了",
+    "^好的",
+    "^ok",
+    "^嗯",
+)
+
+
+def _is_trivial(msg: str, patterns: tuple[str, ...]) -> bool:
+    """一条消息如果过短或匹配琐碎模板，就是低信号，不进记忆。"""
+    stripped = msg.strip()
+    if not stripped or len(stripped) < _MESSAGE_MIN_CHARS:
+        return True
+    lowered = stripped.lower()
+    return any(re.match(p, lowered) for p in patterns)
+
+
+def _should_extract(user_msg: str, assistant_msg: str) -> bool:
+    """返回本轮对话是否值得抽取长期记忆。
+
+    过滤逻辑：
+    - 任一方过短或匹配琐碎模板 → 过滤（寒暄 / 语气词）
+    - 任一方过短也过滤（短对话很难沉淀事实）
+    """
+    return (
+        not _is_trivial(user_msg, _TRIVIAL_USER_PATTERNS)
+        and not _is_trivial(assistant_msg, _TRIVIAL_ASSISTANT_PATTERNS)
+    )
+
 
 def add_async(config: Config, user_msg: str, assistant_msg: str) -> None:
     """对话轮结束后台线程抽取记忆（hot path 零延迟）。
 
+    过滤琐碎消息（寒暄 / 语气词），避免把无信号内容送入记忆库。
     后台线程内屏蔽 stdout/stderr，防止 mem0 或依赖库意外输出污染终端，
     避免与 prompt_toolkit 的输入显示冲突。
     """
+    if not _should_extract(user_msg, assistant_msg):
+        return
 
     def _run():
         import contextlib
