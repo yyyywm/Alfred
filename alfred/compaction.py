@@ -25,8 +25,14 @@ _PRUNE_HEAD_CHARS = 200
 _PRUNE_TAIL_CHARS = 500
 # 这些工具的输出必须完整保留（诊断关键，不可裁剪）
 _PRUNE_PRESERVE_WHITELIST = {"code_patch"}
-# 这些工具的输出按结构化修剪（head + 错误/异常行 + 尾部）
+# 这些工具的输出按结构化修剪（head + 关键行 + 尾部）
 _PRUNE_STRUCTURED = {"shell", "run_python"}
+# 语义关键行：这些行即使不在错误范围内也保留，帮助压缩后仍能判断语义
+_PRUNE_SEMANTIC_MARKERS = (
+    "passed", "failed", "error:", "warning:", "skip", "skipped",
+    "assertion", "traceback", "exception", "timeout", "killed",
+    "::", "=====", "---", ">> ", "$ ",
+)
 
 
 DISTILL_INSTRUCTIONS = """你是会话压缩器。把一段对话历史蒸馏为高密度摘要，供后续会话续跑。
@@ -46,23 +52,25 @@ def _session_chars(session: Session) -> int:
 
 
 def _extract_error_lines(text: str) -> str:
-    """从多行文本中提取错误/异常/失败相关行。
+    """从多行文本中提取关键行（错误 + 语义关键行）。
 
-    命中关键词（大小写不敏感，包含即命中）：error / traceback /
-    failed / exception / assertionerror / warning。返回首 3 行 + 尾 3 行，
-    去重，防止异常栈过长。
+    错误行：含 error / traceback / failed / exception / assertionerror / warning
+    语义行：含 passed / skip / :: / ===== 等（pytest 等工具关键输出）
+    返回首 5 + 尾 5 去重，防止异常栈过长。
     """
-    keywords = ("error", "traceback", "failed", "exception",
+    error_kw = ("error", "traceback", "failed", "exception",
                 "assertionerror", "warning")
+    semantic_kw = _PRUNE_SEMANTIC_MARKERS
     hits: list[str] = []
     for line in text.splitlines():
         stripped = line.strip().lower()
-        if any(kw in stripped for kw in keywords):
+        if any(kw in stripped for kw in error_kw) or \
+           any(kw in stripped for kw in semantic_kw):
             hits.append(line)
     if not hits:
         return ""
-    head = hits[:3]
-    tail = hits[-3:] if len(hits) > 6 else []
+    head = hits[:5]
+    tail = hits[-5:] if len(hits) > 10 else []
     return "\n".join(head + tail)
 
 
