@@ -74,6 +74,10 @@ class MemoryConfig(BaseModel):
     block_char_limit: int = 2000
     recall_budget: int = 10
     recency_half_life_days: int = 30
+    # 记忆客户端 provider 选择（多 agent 共享 / 云端迁移用）
+    provider: Literal["local"] = "local"
+    # 默认用户 id：不同 agent / 用户共享记忆基础设施时用于租户隔离
+    default_user_id: str = "owner"
 
 
 class PathsConfig(BaseModel):

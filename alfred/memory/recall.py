@@ -1,13 +1,4 @@
-"""混合召回：三层记忆召回的统一入口与预算控制。
-
-设计依据：
-- 三层混合（LangMem + ChatGPT + Letta 的主流答案）：
-  ① profile 型 blocks 常驻（agent.py 负责注入，本模块不管）
-  ② collection 型按需工具召回（本模块）
-  ③ background 整理晋升（consolidate.py 负责）
-- 召回硬预算（Chroma context-rot 实证：宁少勿滥）
-- 排序：相关性（向量分）+ 近因（时间衰减）融合
-"""
+"""混合召回：三层记忆召回的统一入口与预算控制。"""
 
 from __future__ import annotations
 
@@ -34,7 +25,6 @@ def _parse_ts(value) -> float | None:
 
 
 def rank_memories(config: Config, items: list[dict]) -> list[dict]:
-    """相关性 + 近因融合排序，按硬预算截断。"""
     budget = config.memory.recall_budget
     half_life = config.memory.recency_half_life_days * 86400
     now = time.time()
@@ -52,9 +42,11 @@ def rank_memories(config: Config, items: list[dict]) -> list[dict]:
     return ranked[:budget]
 
 
-def recall(config: Config, query: str) -> list[dict]:
+def recall(config: Config, query: str, user_id: str | None = None) -> list[dict]:
     """按需召回长期记忆（已排序 + 截断）。"""
-    raw = longterm.search(config, query, limit=config.memory.recall_budget * 2)
+    raw = longterm.search(
+        config, query, limit=config.memory.recall_budget * 2, user_id=user_id,
+    )
     return rank_memories(config, raw)
 
 
