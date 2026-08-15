@@ -6,7 +6,6 @@
 - Claude Code：蒸馏摘要时保留架构决策/未解决问题/用户偏好，丢弃冗余工具输出
 - append-only 纪律的例外：压缩发生在会话过长时，压缩结果作为新的会话起点
 """
-
 from __future__ import annotations
 
 from pydantic_ai import Agent
@@ -19,8 +18,16 @@ from .llm import build_model
 COMPACT_THRESHOLD_CHARS = 60_000
 # 压缩后保留的最近消息条数（不参与蒸馏，原样保留）
 KEEP_RECENT_MESSAGES = 10
-# 单条工具输出超过此长度即裁剪为指针
+# 单条工具输出超过此长度即裁剪为指针（兜底阈值）
 TOOL_OUTPUT_MAX_CHARS = 2_000
+# model-free 预处理：结构化工具保留头/尾的字符数
+_PRUNE_HEAD_CHARS = 200
+_PRUNE_TAIL_CHARS = 500
+# 这些工具的输出必须完整保留（诊断关键，不可裁剪）
+_PRUNE_PRESERVE_WHITELIST = {"code_patch"}
+# 这些工具的输出按结构化修剪（head + 错误/异常行 + 尾部）
+_PRUNE_STRUCTURED = {"shell", "run_python"}
+
 
 DISTILL_INSTRUCTIONS = """你是会话压缩器。把一段对话历史蒸馏为高密度摘要，供后续会话续跑。
 
@@ -38,11 +45,81 @@ def _session_chars(session: Session) -> int:
     return sum(len(m.content) for m in session.messages)
 
 
+def _extract_error_lines(text: str) -> str:
+    """从多行文本中提取错误/异常/失败相关行。
+
+    命中关键词（大小写不敏感，包含即命中）：error / traceback /
+    failed / exception / assertionerror / warning。返回首 3 行 + 尾 3 行，
+    去重，防止异常栈过长。
+    """
+    keywords = ("error", "traceback", "failed", "exception",
+                "assertionerror", "warning")
+    hits: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip().lower()
+        if any(kw in stripped for kw in keywords):
+            hits.append(line)
+    if not hits:
+        return ""
+    head = hits[:3]
+    tail = hits[-3:] if len(hits) > 6 else []
+    return "\n".join(head + tail)
+
+
+def prune_tool_result(tool_name: str | None, content: str) -> tuple[str, int]:
+    """对单条工具结果做 model-free 结构化修剪。
+
+    返回 (trimmed_text, chars_saved)。策略优先级：
+    1. 白名单工具（code_patch 等）→ 原样保留
+    2. 结构化工具（shell / run_python）→ head + error_lines + tail
+    3. 其他 → 兜底截断到 _PRUNE_TAIL_CHARS
+    """
+    if not content:
+        return content, 0
+
+    original_len = len(content)
+
+    if tool_name in _PRUNE_PRESERVE_WHITELIST:
+        return content, 0
+
+    if tool_name in _PRUNE_STRUCTURED:
+        head = content[:_PRUNE_HEAD_CHARS]
+        errors = _extract_error_lines(content)
+        tail = content[-_PRUNE_TAIL_CHARS:] if (
+            len(content) > _PRUNE_HEAD_CHARS + _PRUNE_TAIL_CHARS
+        ) else ""
+        parts = [head]
+        if errors:
+            parts.append(f"\n\n[错误/异常摘要]\n{errors}")
+        if tail and tail != head:
+            parts.append(f"\n\n[输出尾部]\n{tail}")
+        trimmed = "\n".join(parts)
+        if len(trimmed) > TOOL_OUTPUT_MAX_CHARS:
+            trimmed = trimmed[:TOOL_OUTPUT_MAX_CHARS] + "\n[进一步裁剪]"
+        return trimmed, original_len - len(trimmed)
+
+    # 兜底：非结构化工具直接截断
+    if len(content) <= _PRUNE_TAIL_CHARS:
+        return content, 0
+    trimmed = content[:_PRUNE_TAIL_CHARS] + f"\n[已截断：原 {original_len} 字符]"
+    return trimmed, original_len - len(trimmed)
+
+
 def trim_tool_outputs(session: Session) -> int:
-    """把超长工具输出裁剪为指针引用（可恢复压缩）。返回裁剪条数。"""
+    """对每条 tool 消息做 model-free 结构化修剪，超长再兜底截断。
+
+    两步策略：
+    1. 按工具类型做结构化修剪（保留头/错误/尾，白名单保留）
+    2. 修剪后仍超 TOOL_OUTPUT_MAX_CHARS 的兜底截断为指针
+    返回第 2 步触发的裁剪条数。
+    """
     n = 0
     for m in session.messages:
-        if m.role == "tool" and not m.compacted and len(m.content) > TOOL_OUTPUT_MAX_CHARS:
+        if m.role != "tool" or m.compacted:
+            continue
+        pruned, _ = prune_tool_result(m.name or None, m.content)
+        m.content = pruned
+        if len(m.content) > TOOL_OUTPUT_MAX_CHARS:
             head = m.content[:500]
             m.content = (
                 f"{head}\n\n[已裁剪：原输出 {len(m.content)} 字符。"
@@ -76,7 +153,6 @@ def maybe_compact(config: Config, session: Session) -> str | None:
         f"请蒸馏以下对话历史（{len(old)} 条消息）：\n\n{transcript}"
     ).output
 
-    # 用摘要替换旧消息并整体重写会话文件（llm_state 作废，回退种子上下文）
     session.messages = [
         Message(role="assistant",
                 content=f"[早前对话摘要]\n{summary}", compacted=True),
