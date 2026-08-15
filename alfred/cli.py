@@ -50,11 +50,25 @@ from .config import load_config
 from .history import Session, delete_session, list_sessions
 from .memory import longterm
 from .memory.blocks import MemoryBlocks
+from .memory.lessons import LessonsBlock
+from .skills.loader import render_skills_index, scan_skills
 
 app = typer.Typer(help="私人管家 AI Agent", no_args_is_help=True)
 console = Console()
 
 _LOGGER_NAME = "alfred.chat"
+
+
+def _load_lessons_text(config: Config) -> str:
+    """一次性读好 lessons 文本，供 inject_lessons 使用。"""
+    try:
+        lb = LessonsBlock(config)
+        text = lb.read().strip()
+    except Exception:
+        return ""
+    if not text or "还没有教训" in text:
+        return ""
+    return f"# 你从过去中学到的教训（RefleXion 教训库）\n{text}"
 
 
 def _confirm(msg: str) -> bool:
@@ -186,7 +200,16 @@ def chat(
     blocks = MemoryBlocks(config)
     session = Session(config, session_id=session_id)
     agent = build_agent(config)
-    deps = AlfredDeps(config=config, blocks=blocks, confirm=_confirm)
+    # 会话内不变的数据，build_agent 时一次读好，避免每轮系统 prompt 渲染都触发 I/O
+    _skill_index = render_skills_index(scan_skills(config))
+    _lessons_text = _load_lessons_text(config)
+    deps = AlfredDeps(
+        config=config,
+        blocks=blocks,
+        confirm=_confirm,
+        skill_index=_skill_index,
+        lessons_text=_lessons_text,
+    )
     logger = _setup_chat_logger(config, debug=debug)
 
     console.print(Panel(

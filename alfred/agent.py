@@ -80,6 +80,9 @@ class AlfredDeps:
     tool_call_count: int = 0
     # 单轮 code_patch 次数（上限 1，防止连环修改）
     code_patch_count: int = 0
+    # 预加载缓存：技能索引 + 教训文本（build_agent 时一次性读好，避免每轮 I/O）
+    skill_index: str = ""
+    lessons_text: str = ""
 
 
 # 单轮工具调用硬上限
@@ -246,30 +249,22 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
         human = blocks.read("human") if blocks is not None else ""
         return f"# 你对用户的认知（human）\n{human}"
 
+    # ── ④ 静态缓存：技能索引 + 教训（会话内不变，build_agent 时一次读好）────
+
+    @agent.system_prompt
+    def inject_skills(ctx: RunContext[AlfredDeps]) -> str:
+        return ctx.deps.skill_index
+
     @agent.system_prompt
     def inject_lessons(ctx: RunContext[AlfredDeps]) -> str:
-        """RefleXion：从过去问题中提炼的教训，遇到类似场景时参考。"""
-        from .memory.lessons import LessonsBlock
-        
-        try:
-            lb = LessonsBlock(ctx.deps.config)
-            text = lb.read().strip()
-        except Exception:
-            return ""
-        if not text or "还没有教训" in text:
-            return ""
-        return f"# 你从过去中学到的教训（RefleXion 教训库）\n{text}"
+        return ctx.deps.lessons_text
 
-    # ── ③ 动态层：规则、技能索引、日期（易变信息放最后）──────────────
+    # ── ③ 动态层：规则、日期（易变信息放最后）──────────────────
 
     @agent.system_prompt
     def inject_rules(ctx: RunContext[AlfredDeps]) -> str:
         always, index = render_rules(scan_rules(ctx.deps.config))
         return "\n\n".join(t for t in (always, index) if t)
-
-    @agent.system_prompt
-    def inject_skills(ctx: RunContext[AlfredDeps]) -> str:
-        return render_skills_index(scan_skills(ctx.deps.config))
 
     @agent.system_prompt
     def inject_date(ctx: RunContext[AlfredDeps]) -> str:
