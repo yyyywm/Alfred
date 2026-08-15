@@ -21,6 +21,7 @@ from ..history import list_sessions
 from ..llm import build_model
 from . import longterm
 from .blocks import MemoryBlocks
+from .lessons import LessonsBlock
 
 CONSOLIDATE_INSTRUCTIONS = """你是私人管家的"睡眠整理"模块。你的任务是复盘管家与用户的近期对话，
 提炼出值得长期保留的内容，产出结构化的整理草稿。
@@ -30,13 +31,21 @@ CONSOLIDATE_INSTRUCTIONS = """你是私人管家的"睡眠整理"模块。你的
   "memory_entries": ["值得写入长期记忆的事实，每条一句，用第三人称描述用户", ...],
   "human_block_update": "若对用户的整体认知有变化，给出 human 块的完整新内容；无变化则为 null",
   "rule_suggestions": [{"name": "规则名", "content": "规则正文", "reason": "为什么建议"}],  // 用户反复纠正管家的行为模式才提
-  "stale_memories": ["与最新信息矛盾的已有记忆原文"]  // 供用户确认后删除
+  "stale_memories": ["与最新信息矛盾的已有记忆原文"],  // 供用户确认后删除
+  "lessons": [{"category": "场景类别", "lesson": "一句教训", "context": "触发场景"}]  // RefleXion：从问题中提炼的经验
 }
 
 提炼标准：
 - 只保留长期有效的事实（偏好、经历、决策、目标、关系、习惯），日常琐事不要
 - 用户明确纠正过管家的地方优先沉淀
 - human_block_update 要压缩到高信号画像，不是流水账
+
+RefleXion 教训（lessons）提炼标准（Shinn et al. 2023）：
+- 仅当管家在某次对话中出现了**可改进的错误、低效、遗漏**时才提炼
+- 教训要简洁可执行，格式类似"当遇到 X 场景时，优先做 Y"
+- 避免空泛的"下次做得更好"，要具体到场景和策略
+- category 可选值建议：code-debug / workflow / tone / tool-usage / knowledge-gap / self-awareness
+- 没有可提炼的教训时，lessons 字段为空数组
 """
 
 
@@ -132,5 +141,18 @@ def apply_drafts(config: Config, drafts: dict,
                     if longterm.delete(config, m.get("id")):
                         applied.append(f"删除过时记忆：{stale[:50]}")
                     break
+
+    # RefleXion 教训：agent 自我改进，无需用户确认（类比情景记忆自动写入）
+    for item in drafts.get("lessons") or []:
+        category = item.get("category", "general")
+        lesson = item.get("lesson", "")
+        context = item.get("context", "")
+        if lesson:
+            try:
+                lessons_block = LessonsBlock(config)
+                result = lessons_block.add(category, lesson, context)
+                applied.append(f"RefleXion 教训：{result}")
+            except Exception:
+                pass
 
     return applied

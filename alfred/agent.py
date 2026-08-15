@@ -230,6 +230,20 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
         human = blocks.read("human") if blocks is not None else ""
         return f"# 你对用户的认知（human）\n{human}"
 
+    @agent.system_prompt
+    def inject_lessons(ctx: RunContext[AlfredDeps]) -> str:
+        """RefleXion：从过去问题中提炼的教训，遇到类似场景时参考。"""
+        from .memory.lessons import LessonsBlock
+        
+        try:
+            lb = LessonsBlock(ctx.deps.config)
+            text = lb.read().strip()
+        except Exception:
+            return ""
+        if not text or "还没有教训" in text:
+            return ""
+        return f"# 你从过去中学到的教训（RefleXion 教训库）\n{text}"
+
     # ── ③ 动态层：规则、技能索引、日期（易变信息放最后）──────────────
 
     @agent.system_prompt

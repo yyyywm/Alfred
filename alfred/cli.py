@@ -5,6 +5,7 @@ chat 内斜杠命令：
   /remember <内容> 显式教学（写入 human 块）
   /memory 查看长期记忆  /why 查看上一轮用了哪些记忆
   /sessions 列出历史会话  /load <序号或id> 加载历史会话  /delete <序号或id> 删除会话
+  /lessons 查看管家从过去中学到的教训（RefleXion 教训库）
   /status 检查当前模型与 embedding 连接
 """
 
@@ -246,6 +247,8 @@ def chat(
                     console.print("[dim]上一轮没有使用长期记忆。[/dim]")
             elif cmd == "/status":
                 _show_status(config)
+            elif cmd == "/lessons":
+                _show_lessons(config, arg)
             elif cmd == "/sessions":
                 listed_sessions = list_sessions(config)[:10]
                 if not listed_sessions:
@@ -436,6 +439,29 @@ def _show_status(config) -> None:
         title="[bold]连接状态[/bold]",
         border_style="green" if ok else "red",
     ))
+
+
+def _show_lessons(config, arg=None) -> None:
+    """显示 RefleXion 教训列表（按类别过滤）。"""
+    from .memory.lessons import LessonsBlock
+
+    lb = LessonsBlock(config)
+    lessons = lb.list_lessons()
+    if not lessons:
+        console.print("[dim]还没有教训记录。运行 consolidate 从对话中自动提炼。[/dim]")
+        return
+
+    if arg:
+        lessons = [l for l in lessons if arg.lower() in l.get("category", "").lower()]
+        if not lessons:
+            console.print("[dim]没有匹配该类别的教训。[/dim]")
+            return
+
+    console.print("[bold]教训记录（共 {} 条）[/bold]".format(len(lessons)))
+    for i, l in enumerate(lessons, 1):
+        cat = l.get("category", "?")
+        title = l.get("title", "")
+        console.print("  {}. [dim][{}][/dim] {}".format(i, cat, title))
 
 
 @app.command()
