@@ -199,7 +199,8 @@ Alfred/
 1. 静态层：`INSTRUCTIONS`（人格/行为准则/工具准则）
 2. 半静态层：`persona` 块 + `human` 块（`inject_persona`、`inject_human`）
 3. 半动态层：`lessons` 块（`inject_lessons`）—— RefleXion 教训，随对话积累自动更新
-4. 动态层：常驻规则 + 可召回规则索引 + skills 索引 + 当前日期（`inject_rules`、`inject_skills`、`inject_date`）
+4. 静态缓存层：`skill_index` + `lessons_text`（build_agent 时一次性预加载，避免每轮 I/O）
+5. 动态层：常驻规则 + 可召回规则索引 + 当前日期（`inject_rules`、`inject_date`）
 
 **恒定工具集（`agent.py` 中注册，共 8 个）：**
 - `memory_search`：长期记忆召回（混合相关性 + 近因排序）
