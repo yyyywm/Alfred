@@ -89,13 +89,21 @@ def _confirm_prompt(tool_name: str, args: dict) -> str | None:
     if tool_name == "run_python":
         code = args.get("code", "")
         return f"管家想要运行 Python 代码：\n{code[:400]}\n允许吗？"
-    if tool_name == "memory_update_block" and args.get("name") == "persona":
+    if tool_name == "memory_update_block":
+        name = args.get("name", "")
         content = args.get("content", "")
         reason = args.get("reason", "")
-        return (
-            f"管家想要修改自己的人格设定（原因：{reason or '未说明'}）\n"
-            f"新内容预览：\n{content[:300]}{'…' if len(content) > 300 else ''}\n允许吗？"
-        )
+        preview = content[:300] + ("…" if len(content) > 300 else "")
+        if name == "persona":
+            return (
+                "管家想要修改自己的人格设定（原因：%s）\n"
+                "新内容预览：\n%s\n允许吗？" % (reason or "未说明", preview)
+            )
+        if name == "human":
+            return (
+                "管家想要修改对用户的认知画像（原因：%s）\n"
+                "新内容预览：\n%s\n允许吗？" % (reason or "未说明", preview)
+            )
     return None
 
 
