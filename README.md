@@ -222,10 +222,11 @@ paths:
 
 ### Skills（技能）
 
-在 `skills/<name>/SKILL.md` 创建技能文件，含 YAML frontmatter（`name`、`description`）+ Markdown 正文。
+在 `skills/<name>/SKILL.md` 创建技能文件，含 YAML frontmatter（`name`、`description`、`triggers`）+ Markdown 正文。
 
-- 启动时只注入 name+description 到索引，不加载全文
-- agent 判定任务匹配后自动用 `file_read` 读取正文
+- **主动匹配**：基于用户输入关键词匹配 `triggers`，匹配的 skill 全文自动注入 prompt（前置触发）
+- **后置兜底**：匹配但未被 agent 读取的 skill 发出软提示
+- 每次最多注入 3 个 skill，防止 prompt 膨胀
 - 扫描目录由 `paths.skills_dirs` 控制
 
 ### Rules（规则）

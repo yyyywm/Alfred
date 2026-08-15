@@ -308,8 +308,10 @@ python -m pytest tests/ -q
 ## 扩展机制
 
 ### Skills
-- 格式：`skills/<name>/SKILL.md`，含 YAML frontmatter（`name`、`description`）+ Markdown 正文
-- 三级披露：启动只注入 name+description → agent 判定相关后用 `file_read` 读正文 → 按需读同目录资源
+- 格式：`skills/<name>/SKILL.md`，YAML frontmatter（`name`、`description`、`triggers`）+ Markdown 正文
+- **主动匹配**：基于用户输入关键词匹配 `triggers`，匹配的 skill 全文自动注入 prompt（前置触发）
+- **后置兜底**：匹配但未被 agent 读取的 skill 发出 `SkillSuggested` 事件软提示
+- 每次最多注入 3 个 skill；单次最多匹配 3 个（防止 prompt 膨胀）
 - 推荐正文分节：Procedure / Specifications / Advice / Forbidden Actions / Required from User
 - 扫描目录由 `config.yaml` 的 `paths.skills_dirs` 控制，项目级 `skills/` 优先于用户级 `~/.config/alfred/skills`
 
