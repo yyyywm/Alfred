@@ -104,6 +104,18 @@ def _confirm_prompt(tool_name: str, args: dict) -> str | None:
                 "管家想要修改对用户的认知画像（原因：%s）\n"
                 "新内容预览：\n%s\n允许吗？" % (reason or "未说明", preview)
             )
+    if tool_name == "code_patch":
+        path = args.get("path", "")
+        old = args.get("old_string", "")
+        new = args.get("new_string", "")
+        return (
+            "管家想要修改自己的源代码（自举进化）：\n"
+            "  文件：%s\n"
+            "  旧代码（截取）：%s\n"
+            "  新代码（截取）：%s\n"
+            "允许吗？"
+            % (path, old[:300], new[:300])
+        )
     return None
 
 
@@ -361,6 +373,25 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
         except subprocess.TimeoutExpired:
             return "错误：代码执行超时（60 秒限制）。"
 
+    def code_patch(
+        ctx: RunContext[AlfredDeps],
+        path: str,
+        old_string: str,
+        new_string: str,
+    ) -> str:
+        """精确替换项目源代码中的一段文本（自举进化工具）。
+
+        三重门禁：
+        - 路径门禁：只允许修改 alfred/、tests/、config.yaml
+        - 语法门禁：Python 文件修改后 py_compile 验证
+        - 测试门禁：修改后跑 pytest，不过则自动回滚
+
+        old_string 必须在文件中出现且恰好一次。
+        """
+        from .codewriting import code_patch as do_patch
+
+        return do_patch(path, old_string, new_string)
+
     agent.tool(_wrap_tool(memory_search, "memory_search"))
     agent.tool(_wrap_tool(memory_update_block, "memory_update_block"))
     agent.tool(_wrap_tool(notes_search, "notes_search"))
@@ -368,6 +399,7 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
     agent.tool(_wrap_tool(file_read, "file_read"))
     agent.tool(_wrap_tool(shell, "shell"))
     agent.tool(_wrap_tool(run_python, "run_python"))
+    agent.tool(_wrap_tool(code_patch, "code_patch"))
 
     return agent
 
