@@ -130,7 +130,33 @@ class ToolExecutionPipeline:
             raise ToolDeniedError("用户拒绝了该操作。")
 
     def execute_body(self, fn, ctx, kwargs) -> str:
-        return fn(ctx, **kwargs)
+        """执行工具函数。支持 timeout_s 超时控制。"""
+        timeout = self.config.timeout_s
+        if timeout is None or timeout <= 0:
+            return fn(ctx, **kwargs)
+
+        import threading as _th
+
+        result_holder: list[str | Exception] = []
+        exception_holder: list[BaseException] = []
+
+        def _run() -> None:
+            try:
+                result_holder.append(fn(ctx, **kwargs))
+            except Exception as exc:
+                exception_holder.append(exc)
+
+        thread = _th.Thread(target=_run, daemon=True)
+        thread.start()
+        thread.join(timeout=timeout)
+        if thread.is_alive():
+            return (
+                f"错误：工具执行超时（{timeout} 秒限制）。"
+                f"请拆分为更小的调用或增大 timeout_s。"
+            )
+        if exception_holder:
+            raise exception_holder[0]
+        return str(result_holder[0]) if result_holder else ""
 
     def post_normalize(self, result: str) -> str:
         if len(result) > self.config.result_max_chars:
@@ -384,6 +410,157 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
                 ctx.deps.used_skills.append(parent)
         return text
 
+    # ── 对话内目标状态（goal）────────────────────────────────────────
+    # 让 agent 感知自己正在做什么、进度如何、是否受阻
+
+    def create_goal(ctx: RunContext[AlfredDeps], description: str) -> str:
+        """建立当前会话的目标。
+
+        接手跨多轮的长任务（读一本书、写一个功能、规划一个项目）时用此工具
+        记录目标，后续用 update_goal 更新进度或状态。"""
+        from .goals import create_goal as do_create
+        result = do_create(ctx.deps.config, ctx.deps.session_id, description)
+        return result["message"]
+
+    def update_goal(ctx: RunContext[AlfredDeps], *,
+                    status: str | None = None,
+                    description: str | None = None,
+                    progress: str | None = None,
+                    block_reason: str | None = None) -> str:
+        """更新当前会话的目标状态。
+
+        - 进度有进展：progress=\"已完成 XXX\"
+        - 遇阻：status=\"blocked\" + block_reason
+        - 完成：status=\"completed\"
+        - 取消：status=\"cleared\"
+        """
+        from .goals import update_goal as do_update
+        result = do_update(
+            ctx.deps.config, ctx.deps.session_id,
+            status=status, description=description,
+            progress=progress, block_reason=block_reason,
+        )
+        return result["message"]
+
+    def get_goal(ctx: RunContext[AlfredDeps]) -> str:
+        """查看当前会话的目标状态。"""
+        from .goals import get_goal as do_get
+        state = do_get(ctx.deps.config, ctx.deps.session_id)
+        if state is None:
+            return "当前没有活跃目标。"
+        lines = [f"目标：{state['description']}"]
+        lines.append(f"状态：{state['status']}")
+        if state.get("progress"):
+            lines.append(f"进度：{state['progress']}")
+        if state.get("block_reason"):
+            lines.append(f"阻塞原因：{state['block_reason']}")
+        return "\n".join(lines)
+
+    # ── 会话历史自查 ─────────────────────────────────────────────────
+    # 长会话中 agent 会"忘记"前面的工具输出，提供回查能力
+
+    def session_search(ctx: RunContext[AlfredDeps], query: str,
+                       limit: int = 5) -> str:
+        """搜索当前会话历史中的消息内容。
+
+        适用于长会话中需要回想自己之前做过什么、用过什么工具、
+        得到过什么结论时使用。"""
+        from .history import Session
+        try:
+            session = Session(ctx.deps.config, session_id=ctx.deps.session_id)
+        except Exception as e:
+            return f"会话历史暂不可用（{e}）。"
+        keywords = [k for k in query.lower().split() if k]
+        matches: list[str] = []
+        for msg in reversed(session.messages):
+            content = msg.content
+            if content and all(k in content.lower() for k in keywords):
+                tag = f"[{msg.role}]"
+                if msg.name:
+                    tag += f"/{msg.name}"
+                matches.append(f"{tag} {content[:500]}")
+                if len(matches) >= limit:
+                    break
+        if not matches:
+            return f"会话历史中没有找到与「{query}」相关的内容。"
+        return (
+            f"在会话历史中找到 {len(matches)} 条匹配（搜索词：{query}）：\n"
+            + "\n\n---\n\n".join(matches)
+        )
+
+    # ── 喂书↔聊天打通：召回 frameworks ───────────────────────────────
+    # 用户喂过的书在聊天中应该被主动引用
+
+    def frameworks_search(ctx: RunContext[AlfredDeps], query: str,
+                          limit: int = 3) -> str:
+        """搜索用户喂书提炼的思维框架卡片。
+
+        当用户聊到的话题可能与其之前喂过的书、文章有关时主动使用。
+        例如用户聊到「决策」「认知偏差」时，搜一下看用户是否喂过相关书籍。"""
+        from .knowledge.feed import search_frameworks
+        try:
+            results = search_frameworks(ctx.deps.config, query, limit=limit)
+        except Exception as e:
+            return f"框架库暂不可用（{e}）。"
+        if not results:
+            return "思维框架库中没有找到相关内容。"
+        lines: list[str] = []
+        for r in results:
+            title = r.get("title", "")
+            source = r.get("source", "")
+            text = r.get("text", r.get("content", ""))
+            lines.append(f"【{title}】（来源：{source}）\n{text[:800]}")
+        return "\n\n---\n\n".join(lines)
+
+    # ── Agent 自调度 ─────────────────────────────────────────────────
+    # 让 agent 能在对话中给自己定闹钟
+
+    def schedule_create(ctx: RunContext[AlfredDeps], description: str,
+                        prompt: str, due_at: str | None = None) -> str:
+        """创建一个定时提醒任务。
+
+        Args:
+            description: 任务描述（给用户看）
+            prompt: 到期时注入 agent 的提示（用第一人称，agent 视角）
+            due_at: 到期时间，格式 YYYY-MM-DD HH:MM。不传默认 24 小时后。
+        """
+        from .schedule import schedule_create as do_create
+        from datetime import datetime as _dt
+        if due_at:
+            try:
+                parsed = _dt.strptime(due_at, "%Y-%m-%d %H:%M")
+                now_tz = _dt.now().astimezone().tzinfo
+                parsed = parsed.replace(tzinfo=now_tz)
+                timestamp = parsed.timestamp()
+            except (ValueError, TypeError):
+                return "错误：due_at 格式应为 YYYY-MM-DD HH:MM"
+            result = do_create(ctx.deps.config, ctx.deps.session_id,
+                               description, prompt, due_at=timestamp)
+        else:
+            result = do_create(ctx.deps.config, ctx.deps.session_id,
+                               description, prompt)
+        return result["message"]
+
+    def schedule_delete(ctx: RunContext[AlfredDeps], schedule_id: str) -> str:
+        """取消一条定时任务。id 从 schedule_list 获取。"""
+        from .schedule import schedule_delete as do_delete
+        result = do_delete(ctx.deps.config, schedule_id)
+        return result["message"]
+
+    def schedule_list(ctx: RunContext[AlfredDeps]) -> str:
+        """列出所有定时任务。"""
+        from .schedule import schedule_list as do_list
+        result = do_list(ctx.deps.config, ctx.deps.session_id)
+        if result["count"] == 0:
+            return "当前没有定时任务。"
+        lines = [f"共有 {result['count']} 条定时任务："]
+        for e in result["entries"]:
+            lines.append(
+                f"  [{e['id']}] {e['description']}  "
+                f"到期：{e['due_at']}  ({e['status']})"
+            )
+        return "\n".join(lines)
+
     def shell(ctx: RunContext[AlfredDeps], command: str) -> str:
         """执行 shell 命令（需用户确认）。用于文件操作、运行脚本等。"""
         try:
@@ -442,6 +619,14 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
     agent.tool(_wrap_tool(notes_search, "notes_search"))
     agent.tool(_wrap_tool(episodes_search, "episodes_search"))
     agent.tool(_wrap_tool(file_read, "file_read"))
+    agent.tool(_wrap_tool(create_goal, "create_goal"))
+    agent.tool(_wrap_tool(update_goal, "update_goal"))
+    agent.tool(_wrap_tool(get_goal, "get_goal"))
+    agent.tool(_wrap_tool(session_search, "session_search"))
+    agent.tool(_wrap_tool(frameworks_search, "frameworks_search"))
+    agent.tool(_wrap_tool(schedule_create, "schedule_create"))
+    agent.tool(_wrap_tool(schedule_delete, "schedule_delete"))
+    agent.tool(_wrap_tool(schedule_list, "schedule_list"))
     agent.tool(_wrap_tool(shell, "shell"))
     agent.tool(_wrap_tool(run_python, "run_python"))
     agent.tool(_wrap_tool(code_patch, "code_patch"))
