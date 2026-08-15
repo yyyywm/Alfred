@@ -74,6 +74,12 @@ class AlfredDeps:
     bus: EventBus = field(default_factory=EventBus)
     tool_records: list[ToolCallRecord] = field(default_factory=list)
     tool_records_lock: threading.Lock = field(default_factory=threading.Lock)
+    # 单轮工具调用次数，防止 agent 无限循环调用同一工具
+    tool_call_count: int = 0
+
+
+# 单轮工具调用硬上限
+_MAX_TOOL_CALLS_PER_TURN = 20
 
 
 def _confirm_prompt(tool_name: str, args: dict) -> str | None:
@@ -98,6 +104,10 @@ def _wrap_tool(fn: Callable, tool_name: str) -> Callable:
 
     @functools.wraps(fn)
     def wrapper(ctx: RunContext[AlfredDeps], **kwargs):
+        # 单轮工具调用上限
+        if ctx.deps.tool_call_count >= _MAX_TOOL_CALLS_PER_TURN:
+            return f"错误：本轮工具调用已达上限 {_MAX_TOOL_CALLS_PER_TURN}，请精简思路后重试。"
+        ctx.deps.tool_call_count += 1
         session_id = ctx.deps.session_id
         bus = ctx.deps.bus
         records = ctx.deps.tool_records
