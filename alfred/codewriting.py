@@ -1,18 +1,21 @@
 """Self-modification: code_patch 工具的实现模块。
 
+理论依据（arXiv 溯源）：
+- CodeAct (Wang et al., ICML 2024, 2402.01030)：可执行代码作为统一动作空间，
+  本工具是 CodeAct 在源码修改场景的具体化。
+- SWE-bench (Jimenez et al., 2023) 评估范式：生成 patch → 测试验证 → 通过才算修复。
+  本工具的三重门禁（路径/语法/测试）对齐该标准流程。
+- 自修改自身代码（而非修改第三方项目）在学术界是开放问题，尚无成熟基准。
+  因此强约束：人类是进化方向决策者，agent 是执行者。
+
 三重门禁：
-1. 路径门禁：只允许写入 alfred/、tests/、config.yaml
+1. 路径门禁：只允许写入 alfred/ 和 config.yaml（tests/ 不在范围内）
 2. 语法门禁：Python 文件用 py_compile 验证
 3. 测试门禁：修改后跑 pytest tests/ -q，不过则回滚
 
-使用方式（agent 端）：
+agent 端用法：
     code_patch(path="alfred/x.py", old_string="...要替换的片段...",
                new_string="...新内容...")
-
-设计原则：
-- 每次只替换一个片段（old_string 必须唯一匹配）
-- 修改失败时自动回滚到原文件
-- 不做 git commit（commit 由 shell 工具负责，用户可确认）
 """
 
 from __future__ import annotations
@@ -23,13 +26,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .config import load_config
+from .config import load_config  # noqa: F401 — 保留导入供未来扩展（路径配置集中化管理）
 
 
-# 允许写入的顶层路径（相对项目根）。其他路径拒写。
+# 允许写入的顶层路径（相对项目根）。tests/ 被排除——
+# 允许 agent 修改测试文件会降低测试门禁的可信度。
 _ALLOWED_PREFIXES = (
     "alfred/",
-    "tests/",
 )
 
 # 允许写入的精确文件名（相对项目根）

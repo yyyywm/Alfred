@@ -1,12 +1,13 @@
 """Agent 内核：prompt 分层组装 + 恒定工具集 + 对话循环。
 
 设计依据：
-- prompt 三层组装（Manus KV-cache 纪律）：静态 instructions → 半静态
-  memory blocks → 动态层（skills/rules 索引、日期）
+- prompt 四层组装（KV-cache 纪律）：静态 instructions → 半静态
+  memory blocks → 半动态 lessons (RefleXion) → 动态层（skills/rules 索引、日期）
 - 工具集会话内恒定（mask 不删）；按工作流合并；命名空间前缀；
   错误返回可操作化（Anthropic《Writing tools for agents》）
-- persona 修改、shell/python 执行必须用户确认——代码层强制（hooks 思想），
+- persona/human 修改、shell/python/code_patch 执行必须用户确认——代码层强制（hooks 思想），
   不靠 prompt 约束
+- code_patch 是 CodeAct (ICML 2024) 在自修改场景的具体化，三重门禁对齐 SWE-bench 评估范式
 - run_python 作为 CodeAct 逃生舱
 """
 
@@ -76,6 +77,8 @@ class AlfredDeps:
     tool_records_lock: threading.Lock = field(default_factory=threading.Lock)
     # 单轮工具调用次数，防止 agent 无限循环调用同一工具
     tool_call_count: int = 0
+    # 单轮 code_patch 次数（上限 1，防止连环修改）
+    code_patch_count: int = 0
 
 
 # 单轮工具调用硬上限
@@ -381,13 +384,20 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
     ) -> str:
         """精确替换项目源代码中的一段文本（自举进化工具）。
 
+        理论依据：CodeAct (ICML 2024) + SWE-bench 评估范式。
+        人类是进化方向决策者，agent 是执行者。
+
         三重门禁：
-        - 路径门禁：只允许修改 alfred/、tests/、config.yaml
+        - 路径门禁：只允许修改 alfred/ 和 config.yaml
         - 语法门禁：Python 文件修改后 py_compile 验证
         - 测试门禁：修改后跑 pytest，不过则自动回滚
 
-        old_string 必须在文件中出现且恰好一次。
+        单轮最多调用一次 code_patch，防止连环修改。
         """
+        if ctx.deps.code_patch_count >= 1:
+            return "错误：本轮已调用过 code_patch，一次最多修改一个文件。"
+        ctx.deps.code_patch_count += 1
+
         from .codewriting import code_patch as do_patch
 
         return do_patch(path, old_string, new_string)
@@ -446,6 +456,7 @@ def chat_turn_stream(
         session_id=session.id,
         bus=bus,
         tool_records=[],
+        code_patch_count=0,
     )
 
     error_holder: list[Exception] = []
