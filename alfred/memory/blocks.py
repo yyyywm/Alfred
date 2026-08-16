@@ -19,9 +19,25 @@ from ..config import Config
 logger = logging.getLogger(__name__)
 
 HUMAN_TEMPLATE = """# Human Block —— 我对用户的认知
-# 由管家在与用户的相处中持续更新。上限 {limit} 字符，只保留高信号事实。
+# 上限 {limit} 字符。用结构化分类保留高信号事实；细节交给长期记忆。
 
-（还没有关于用户的记录。随着对话，我会逐渐了解 TA 的经历、偏好、思维方式。）
+## 基本资料
+_（姓名 / 职业 / 所在地 / 关系）_
+
+## 性格与思维
+_（沟通风格 / 决策方式 / 价值观）_
+
+## 项目与工作
+_（正在进行的项目 / 角色 / 关键决策）_
+
+## 生活方式
+_（作息 / 兴趣 / 习惯）_
+
+## 重要关系与偏好
+_（重要的人 / 偏好的选择）_
+
+## 关键决策记录
+_（重大选择的背景与理由，仅保留最近 5 条）_
 """
 
 PERSONA_TEMPLATE = """# Persona Block —— 我的自我设定
@@ -35,21 +51,29 @@ PERSONA_TEMPLATE = """# Persona Block —— 我的自我设定
 
 
 class MemoryBlocks:
-    """human/persona 两个常驻记忆块的读写与版本化。"""
+    """human/persona 两个常驻记忆块的读写与版本化。
+
+    字符上限按块可独立配置（config.memory.<block>_block_char_limit），
+    未设置时回退到 config.memory.block_char_limit。
+    """
 
     NAMES = ("human", "persona")
 
     def __init__(self, config: Config):
+        self.config = config
         self.dir = config.path(config.memory.dir)
-        self.limit = config.memory.block_char_limit
         self.dir.mkdir(parents=True, exist_ok=True)
         self._repo = self._init_repo()
         for name in self.NAMES:
             f = self.dir / f"{name}.md"
             if not f.exists():
                 template = HUMAN_TEMPLATE if name == "human" else PERSONA_TEMPLATE
-                f.write_text(template.format(limit=self.limit), encoding="utf-8")
+                f.write_text(template.format(limit=self.limit_for(name)),
+                             encoding="utf-8")
         self._commit("init: memory blocks", allow_empty=False)
+
+    def limit_for(self, name: str) -> int:
+        return self.config.memory.limit_for(name)
 
     def _init_repo(self) -> git.Repo:
         if not (self.dir / ".git").exists():
@@ -71,9 +95,10 @@ class MemoryBlocks:
 
     def update(self, name: str, content: str, reason: str = "") -> str:
         """整块替换写入 + git 提交。返回操作结果描述（给 agent 的反馈）。"""
-        if len(content) > self.limit:
+        limit = self.limit_for(name)
+        if len(content) > limit:
             return (
-                f"写入被拒绝：内容 {len(content)} 字符超过上限 {self.limit}。"
+                f"写入被拒绝：内容 {len(content)} 字符超过 {name} 块上限 {limit}。"
                 f"请压缩为更高信号的摘要后重试——只保留长期有效的事实，"
                 f"细节应写入长期记忆（memory_search 可召回），不要堆在这里。"
             )
@@ -84,7 +109,7 @@ class MemoryBlocks:
         path.write_text(content, encoding="utf-8")
         msg = f"update {name} block" + (f": {reason}" if reason else "")
         self._commit(msg, label=name)
-        return f"{name} 块已更新（{len(content)}/{self.limit} 字符），已提交版本记录。"
+        return f"{name} 块已更新（{len(content)}/{limit} 字符），已提交版本记录。"
 
     def _commit(self, message: str, allow_empty: bool = True, label: str = "") -> None:
         repo = self._repo

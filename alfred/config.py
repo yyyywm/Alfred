@@ -71,13 +71,27 @@ class ModelsConfig(BaseModel):
 
 class MemoryConfig(BaseModel):
     dir: str = "data/memory"
+    # 全局默认上限（向后兼容）
     block_char_limit: int = 2000
+    # 各块独立上限（human 块需要更多空间承载结构化画像；默认 8000）
+    human_block_char_limit: int | None = None
+    persona_block_char_limit: int | None = None
+    # lessons 保持独立（见 lessons.py）
+    lessons_block_char_limit: int = 4000
     recall_budget: int = 10
     recency_half_life_days: int = 30
     # 记忆客户端 provider 选择（多 agent 共享 / 云端迁移用）
     provider: Literal["local"] = "local"
     # 默认用户 id：不同 agent / 用户共享记忆基础设施时用于租户隔离
     default_user_id: str = "owner"
+
+    def limit_for(self, block: str) -> int:
+        """返回指定块的字符上限，优先取块级配置，回退到全局默认。"""
+        if block == "human" and self.human_block_char_limit is not None:
+            return self.human_block_char_limit
+        if block == "persona" and self.persona_block_char_limit is not None:
+            return self.persona_block_char_limit
+        return self.block_char_limit
 
 
 class PathsConfig(BaseModel):

@@ -121,13 +121,14 @@ alfred chat -s <session>   # 恢复指定会话
 
 三个 Markdown 文件，存储于 `data/memory/`，git 版本化，每次修改自动 commit，可回滚。
 
-| 块 | 内容 | 修改需确认？ |
-|---|---|---|
-| `human.md` | 管家对用户的认知（经历、偏好、思维方式） | ✅ 需确认 |
-| `persona.md` | 管家的自我设定（性格、原则、行为准则） | ✅ 需确认 |
-| `lessons.md` | 从过去失败/纠正中提炼的教训（追加型，自动激活） | ❌ 自动写入 |
+| 块 | 内容 | 默认上限 | 修改需确认？ |
+|---|---|---|---|
+| `human.md` | 管家对用户的认知（结构化：基本资料 / 性格思维 / 项目工作 / 生活方式 / 关系偏好 / 关键决策） | 8000 字符 | ✅ 需确认（但 auto-consolidate 小幅更新自动写入） |
+| `persona.md` | 管家的自我设定（性格、原则、行为准则） | 2000 字符 | ✅ 需确认 |
+| `lessons.md` | 从过去失败/纠正中提炼的教训（追加型，自动激活） | 4000 字符 | ❌ 自动写入 |
 
-- 每个块有字符上限（默认 2000 字符，lessons 4000 字符），超过上限时会拒绝写入或自动压缩
+- 每个块上限独立可调（`config.yaml` 的 `memory.<block>_block_char_limit`）
+- human 块采用**结构化分类模板**（## 基本资料 / ## 性格与思维 / ## 项目与工作 / ## 生活方式 / ## 重要关系与偏好 / ## 关键决策记录），高信号事实按类存放，比纯流水账更"懂你"
 - 使用 `/remember` 可直接向 human 块追加一条事实
 - 使用 `alfred memory history human` 或 `alfred memory history persona` 查看版本历史
 
@@ -143,11 +144,38 @@ alfred chat -s <session>   # 恢复指定会话
 
 记录"成功的案例"——场景、思路、行动、结果四元组，存 LanceDB。Alfred 遇到类似场景时自动检索，借鉴之前的做法。
 
-### RefleXion 教训机制
+## RefleXion 教训机制
 
 遇到工具调用失败、用户纠正、操作被拒绝时，Alfred 会自动（或经 `alfred consolidate` 复盘时）提炼为一条教训，追加到 `lessons.md`。下次遇到类似场景时，教训自动注入系统 prompt，指导决策。
 
 使用 `/lessons` 查看所有教训，支持按类别过滤（如 `/lessons code-debug`）。
+
+## 主动行为与成长闭环
+
+### auto-consolidate 自动闭环
+
+`/exit` 退出时，若满足自动条件（≥3 轮对话且距上次复盘 >24 小时），Alfred 会在后台无人值守运行 `consolidate`，自动沉淀：
+
+| 草稿类型 | 处理策略 |
+|---|---|
+| RefleXion 教训（lessons） | ✅ 自动写入 |
+| 长期记忆条目（memory_entries） | ✅ 自动写入 |
+| 情景记忆四元组（episodes） | ✅ 自动写入 |
+| human 块更新（小幅） | ✅ 自动写入（改动 ≤ 500 字符） |
+| human 块更新（大幅） | ⏸️ 降级待审（/consolidate-review 查看） |
+| 规则建议 / 过时记忆删除 | ⏸️ 待用户确认 |
+
+### 情景记忆自动采集
+
+- **手动**：agent 在成功完成一个有代表性的任务后，会用 `save_episode` 工具主动保存四元组（场景/思路/行动/结果）
+- **自动**：consolidate 复盘时，强模型从近期对话中提取成功的处理案例，自动写入情景记忆库
+- **召回**：下次遇到类似场景，`episodes_search` 自动检索借鉴
+
+### 定时任务与主动处理
+
+- 用户可在 chat 中用 `schedule_create` 创建定时任务（agent 可自主调用，也可用户指示）
+- 任务到期后在**任意 session** 下下次对话时自动注入 agent 上下文，触发主动处理
+- 换 session / 重启不会丢失已创建的任务
 
 ## 知识系统
 
@@ -199,11 +227,12 @@ models:
 
 memory:
   dir: data/memory
-  block_char_limit: 2000
+  block_char_limit: 2000          # 全局默认上限（persona / 未单独配置的块）
+  human_block_char_limit: 8000    # human 块独立上限（结构化画像，需要更多空间）
   recall_budget: 10
   recency_half_life_days: 30
-  provider: local                        # 记忆客户端 provider（当前仅 local）
-  default_user_id: owner                 # 默认用户 id，多 agent 共享时用于隔离
+  provider: local
+  default_user_id: owner
 
 paths:
   history_dir: data/history

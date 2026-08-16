@@ -198,12 +198,17 @@ Alfred/
 4. 静态缓存层：`skill_index` + `lessons_text`（build_agent 时一次性预加载，避免每轮 I/O）
 5. 动态层：常驻规则 + 可召回规则索引 + 当前日期（`inject_rules`、`inject_date`）
 
-**恒定工具集（`agent.py` 中注册，共 8 个）：**
+**恒定工具集（`agent.py` 中注册，共 14 个）：**
 - `memory_search`：长期记忆召回（混合相关性 + 近因排序）
 - `memory_update_block`：更新 human/persona 块（human 和 persona 修改均需用户确认）
 - `notes_search`：笔记 RAG
 - `episodes_search`：情景记忆检索（借鉴过去的成功经验）
+- `save_episode`：保存情景记忆四元组（agent 成功完成任务后主动调用，补全情景记忆库）
 - `file_read`：读取技能/规则/任意文本文件
+- `create_goal` / `update_goal` / `get_goal`：对话内目标状态管理
+- `session_search`：搜索当前会话历史
+- `frameworks_search`：检索已提炼的思维框架
+- `schedule_create` / `schedule_delete` / `schedule_list`：agent 自调度定时任务
 - `shell`：执行 shell 命令（需用户确认）
 - `run_python`：执行 Python 代码（需用户确认）
 - `code_patch`：自举进化工具，精确替换源代码中的一段文本（需用户确认，三重门禁，单轮最多一次）
@@ -223,7 +228,7 @@ Alfred/
 - `local.py`：`LocalMemoryClient`，基于 mem0 + 本地 Qdrant 实现 `MemoryClient` 协议。
 
 **记忆块：**
-- `blocks.py`：`human`/`persona` 两个常驻记忆块，字符上限 `memory.block_char_limit`，每次修改自动 git commit；git commit 失败时记录 warning（不再静默吞掉）
+- `blocks.py`：`human`/`persona` 两个常驻记忆块，**每块上限独立可调**（`config.memory.<block>_block_char_limit`，未设置回退 `block_char_limit`）；human 块默认 8000 字符 + 结构化分类模板（基本资料 / 性格思维 / 项目工作 / 生活方式 / 关系偏好 / 关键决策），支持承载更完整的用户画像；每次修改自动 git commit；git commit 失败时记录 warning
 - `lessons.py`：`LessonsBlock`，RefleXion 教训记忆块（追加型，上限 4000 字符，超限自动压缩保留最近 20 条），与 human/persona 共用同一个 memory git 仓库
 
 **长期记忆：**
@@ -236,7 +241,7 @@ Alfred/
 - `episodic.py`：情景记忆四元组（场景/思路/行动/结果），存 LanceDB `episodes` 表，`search_episodes` 支持语义检索
 
 **整理：**
-- `consolidate.py`：sleep-time 整理，产出 memory_entries / human_block_update / rule_suggestions / stale_memories / lessons 五类草稿；`apply_drafts` 逐项确认后入库，`apply_unattended` 无人值守模式自动写入 lessons、其余草稿暂存到 `data/history/consolidate_pending.jsonl` 待用户审查
+- `consolidate.py`：sleep-time 整理，产出五类草稿（memory_entries / human_block_update / rule_suggestions / stale_memories / lessons / episodes）；`apply_drafts` 逐项确认后入库；`apply_unattended` 无人值守模式**自动写入** lessons + memory_entries + episodes（用户事实沉淀和情景记忆四元组均为低风险 ADD-only 操作），human_block_update 按改动大小（≤500 字符自动写，超阈值降级 pending），rule_suggestions / stale_memories 始终待审。大幅 human 更新与待审项写入 `data/history/consolidate_pending.jsonl` 供 `/consolidate-review` 查看
 - `consolidate_state.py`：append-only JSONL 追踪对话轮数与最近复盘时间；`should_auto_consolidate()` 在 `chat` 退出时判断是否自动触发无人值守 consolidate（阈值：≥3 轮且距上次复盘 >24 小时），后台线程执行不阻塞退出
 - `audit.py`：记忆审计视图（`alfred audit` / `/audit`），诊断记忆库健康度、工具调用成功率、冷笔记、死规则、过期目标
 - `monitor.py`：自监控度量（工具调用/记忆召回/skill 使用按天统计），供未来可视化/告警接入
@@ -244,7 +249,14 @@ Alfred/
 **自动复盘流程**：
 1. 每轮对话结束追加一条 turn 记录到 `consolidate_state.jsonl`
 2. `/exit` 时检查是否满足自动条件 → 是则启动后台线程跑 `apply_unattended`
-3. 用户下次进入 chat 运行 `/consolidate-review` 查看暂存草稿，再手动 `alfred consolidate` 逐项确认
+3. `apply_unattended` 自动写入 lessons / memory_entries / episodes（低风险 ADD-only），小幅 human 更新也自动写；大幅更新与待审项暂存到 `consolidate_pending.jsonl`
+4. 用户下次进入 chat 运行 `/consolidate-review` 查看暂存草稿，再手动 `alfred consolidate` 逐项确认
+
+**主动行为入口**（让 Alfred 从"问答机"变"管家"）：
+- **schedule_fire_pending**：CLI 每轮对话前检查全局定时任务，已到期任务以系统提示注入 agent 上下文，让 agent 主动处理
+- **启动注入**：chat 启动时若有历史遗留到期任务，作为首条"用户输入"自动处理，agent 无需用户主动开口
+- **跨 session 全局可见**：schedule 数据存全局 JSONL，不绑定 session，换 session / 重启不丢
+- **save_episode 工具**：agent 成功完成任务后主动调用，把经验沉淀为情景记忆四元组（配合 consolidate 自动萃取形成闭环）
 
 ### 知识层（`alfred/knowledge/`）
 - `chunking.py`：按 Markdown 标题层级切分，保留标题路径前缀，解析 frontmatter
@@ -275,8 +287,10 @@ Alfred/
 12. **提交必须为单一逻辑单元**：每次 commit 只能包含一个功能/修复/文档主题，禁止混提；同文件多主题改动应使用 `git add -p` 拆分，提交信息遵循 Conventional Commits。
 13. **记忆客户端可插拔**：新增记忆后端只需实现 `MemoryClient` 协议并注册到 longterm 工厂；消费者通过 `user_id` 实现租户隔离。
 14. **工具调用频率限制**：单轮对话工具调用硬上限 20 次，防止 agent 无限循环。
-15. **重要功能先做理论溯源**：实现任何重要功能前，必须先查阅相关学术论文（arXiv）和成熟 OSS 实现，产出理论溯源表（论文 → 核心机制 → 与方案的关系），再给出设计。禁止自创理论——学术界已有方案直接借鉴。无理论依据的设计必须诚实指出并修正。
-16. **自举进化需人类确认**：agent 可以修改自身代码（`code_patch`），但不自行决定"该改什么"。进化方向必须由用户明确指示或 consolidate 发现的明确问题触发，每次修改需用户确认。
+15. **情景记忆要主动写**：agent 成功完成有代表性任务后应调用 `save_episode`，让情景记忆库自然增长。
+16. **无人值守自动沉淀**：auto-consolidate 自动写 lessons / memory_entries / episodes；human 块大幅更新才需用户确认。
+17. **重要功能先做理论溯源**：实现任何重要功能前，必须先查阅相关学术论文（arXiv）和成熟 OSS 实现，产出理论溯源表（论文 → 核心机制 → 与方案的关系），再给出设计。禁止自创理论——学术界已有方案直接借鉴。无理论依据的设计必须诚实指出并修正。
+18. **自举进化需人类确认**：agent 可以修改自身代码（`code_patch`），但不自行决定"该改什么"。进化方向必须由用户明确指示或 consolidate 发现的明确问题触发，每次修改需用户确认。
 
 ## 测试策略
 
