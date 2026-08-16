@@ -57,6 +57,76 @@ from .skills.loader import render_skills_index, scan_skills
 app = typer.Typer(help="私人管家 AI Agent", no_args_is_help=True)
 console = Console()
 
+_ALFRED_VERSION = "0.1.0"
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+ALFRED_LOGO = (
+    "  \u2588\u2588\u2588\u2588\u2588\u2588  Welcome to Alfred!"
+)
+ALFRED_HELP_LINE = (
+    "  Send /help for help information."
+)
+
+# 固定边框宽度（ASCII 列宽，CJK 按 2 列计），与 Kimi Code 风格一致
+_BANNER_WIDTH = 96
+
+
+def _visual_len(s: str) -> int:
+    """粗略估算字符串的终端视觉宽度。
+    - 半角 ASCII / box-drawing (╭─│): 1 列
+    - 全角 CJK / block elements (█▓▒░) / fullwidth forms: 2 列
+    """
+    width = 0
+    for ch in s:
+        cp = ord(ch)
+        if (0x2E80 <= cp <= 0x9FFF          # CJK
+                or 0xFF01 <= cp <= 0xFF60    # fullwidth forms
+                or 0x2580 <= cp <= 0x258F    # block elements (█▓▒░▆▄▌▐)
+                or cp in (0x2590, 0x2591)):  # heavy/light shade blocks
+            width += 2
+        else:
+            # ASCII + box-drawing (╭─│) render as 1 cell in terminals
+            width += 1
+    return width
+
+
+def _draw_box(lines: list[str]) -> str:
+    """用 Box Drawing 字符绘制一个居中的边框面板。"""
+    width = _BANNER_WIDTH
+    top = "\u256d" + "\u2500" * (width - 2) + "\u256e"
+    bot = "\u2570" + "\u2500" * (width - 2) + "\u256f"
+
+    def _pad(row: str) -> str:
+        visual = _visual_len(row)
+        remaining = width - 2 - visual  # 去掉左右边框
+        return "\u2502 " + row + (" " * max(remaining - 1, 0)) + "\u2502"
+
+    return "\n".join([top] + [_pad(l) for l in lines] + [bot])
+
+
+def _print_startup_banner(config: "Config", session_id: str, has_session: bool) -> None:
+    """渲染类似 Kimi Code 的启动面板。"""
+    session_text = session_id if has_session else "(will be created on your first message)"
+
+    lines = [
+        "",
+        ALFRED_LOGO,
+        ALFRED_HELP_LINE,
+        "",
+        f"  Directory: {_PROJECT_ROOT}",
+        f"  Session:   {session_text}",
+        f"  Model:     {config.models.chat}",
+        f"  Version:   {_ALFRED_VERSION}",
+        "",
+    ]
+
+    console.print()
+    console.print(_draw_box(lines))
+    if not has_session:
+        console.print(
+            "\n[dim]  No session yet — one will be created on your first message.[/dim]\n"
+        )
+
 _LOGGER_NAME = "alfred.chat"
 
 
@@ -213,10 +283,7 @@ def chat(
     )
     logger = _setup_chat_logger(config, debug=debug)
 
-    console.print(Panel(
-        f"会话 {session.id} ｜ 模型 {config.models.chat} ｜ 输入 /exit 退出，/help 查看命令",
-        title="[bold]私人管家[/bold]",
-    ))
+    _print_startup_banner(config, session.id, has_session=bool(session_id))
     logger.info("会话开始: %s, 模型: %s, debug: %s", session.id, config.models.chat, debug)
 
     # 检查是否有历史 session 遗留的到期定时任务（未在当前 session 触发过），
@@ -682,7 +749,7 @@ def _show_whoami(config, blocks: MemoryBlocks) -> None:
     try:
         from .knowledge import store as knowledge_store
         db = knowledge_store.get_db(config)
-        if "episodes" in db.table_names():
+        if "episodes" in db.list_tables():
             episode_count = len(db.open_table("episodes").to_list())
     except Exception:
         episode_count = 0
@@ -691,7 +758,7 @@ def _show_whoami(config, blocks: MemoryBlocks) -> None:
     notes_count = 0
     try:
         db = knowledge_store.get_db(config)
-        if "notes" in db.table_names():
+        if "notes" in db.list_tables():
             notes_count = len(db.open_table("notes").to_list())
     except Exception:
         notes_count = 0
@@ -700,7 +767,7 @@ def _show_whoami(config, blocks: MemoryBlocks) -> None:
     framework_count = 0
     try:
         db = knowledge_store.get_db(config)
-        if "frameworks" in db.table_names():
+        if "frameworks" in db.list_tables():
             framework_count = len(db.open_table("frameworks").to_list())
     except Exception:
         framework_count = 0
