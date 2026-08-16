@@ -241,7 +241,7 @@ def apply_unattended(config: Config, drafts: dict) -> list[str]:
             delta = len(human_update) - current_real
             if abs(delta) <= AUTO_HUMAN_UPDATE_MAX_CHARS:
                 result = blocks.update("human", human_update, reason="auto-consolidate")
-                applied.append(f"human 块已更新（{result}）")
+                applied.append(str(result))
             else:
                 pending["human_block_update"] = human_update
         except Exception:
