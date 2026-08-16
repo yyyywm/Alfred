@@ -8,6 +8,7 @@ chat 内斜杠命令：
   /lessons 查看管家从过去中学到的教训（RefleXion 教训库）
   /whoami 查看 Alfred 的积累状态（记忆/教训/情景/笔记/框架）
   /status 检查当前模型与 embedding 连接
+  /consolidate-review 查看自动复盘暂存的待审查草稿
 """
 
 from __future__ import annotations
@@ -239,6 +240,23 @@ def chat(
             cmd, _, arg = user_input.partition(" ")
             arg = arg.strip()
             if cmd in ("/exit", "/quit"):
+                # 退出前提示待审查的草稿（不阻塞，自动 consolidate 走后台线程）
+                try:
+                    from .memory import consolidate_state
+                    from .memory.consolidate_state import should_auto_consolidate
+                    pending_path = config.path(config.paths.history_dir) / "consolidate_pending.jsonl"
+                    has_pending = pending_path.exists() and pending_path.stat().st_size > 0
+                    auto_will_run = should_auto_consolidate(config, turn_count)
+                    if auto_will_run:
+                        console.print(
+                            "[dim]💤 满足自动复盘条件，将在后台运行 consolidate（稍后 /consolidate-review 可查看结果）。[/dim]"
+                        )
+                    elif has_pending:
+                        console.print(
+                            "[dim]💤 有待审查的草稿，运行 /consolidate-review 查看。[/dim]"
+                        )
+                except Exception as e:
+                    logger.warning("退出前复盘检测失败: %s", e)
                 break
             elif cmd == "/help":
                 console.print(__doc__)
@@ -316,6 +334,8 @@ def chat(
                             logger.info("删除会话: %s", sid)
                         else:
                             console.print(f"[red]会话不存在：{sid}[/red]")
+            elif cmd == "/consolidate-review":
+                _show_consolidate_pending(config)
             else:
                 console.print(f"[red]未知命令 {cmd}，输入 /help 查看。[/red]")
             continue
@@ -417,6 +437,10 @@ def chat(
         # hot path 结束后，后台异步沉淀长期记忆
         longterm.add_async(config, user_input, reply)
 
+        # 记录对话轮数，供 consolidate_state 判断是否自动触发
+        from .memory import consolidate_state
+        consolidate_state.record_turn(config, session.id, turn_count)
+
         # 每 N 轮提示用户考虑复盘（不强制，只是把动作浮出水面）
         if turn_count % _CONSOLIDATE_REMINDER_EVERY == 0:
             console.print(
@@ -425,7 +449,76 @@ def chat(
             )
 
     logger.info("会话结束: %s, 总轮数: %d", session.id, turn_count)
+
+    # 自动触发 consolidate：满足条件时在后台运行无人值守模式
+    # 用线程包装，避免 LLM 调用阻塞 /exit 退出
+    try:
+        from .memory import consolidate_state
+        if consolidate_state.should_auto_consolidate(config, turn_count):
+            logger.info("会话结束，满足自动复盘条件，后台启动无人值守 consolidate")
+            import threading as _threading
+
+            def _auto_consolidate_run() -> None:
+                try:
+                    from .memory.consolidate import apply_unattended, generate_drafts
+                    drafts = generate_drafts(config)
+                    if drafts and "error" not in drafts:
+                        applied = apply_unattended(config, drafts)
+                        if applied:
+                            logger.info("无人值守 consolidate 已应用: %s", applied)
+                        consolidate_state.record_consolidate(config)
+                except Exception as exc:
+                    logger.warning("无人值守 consolidate 失败: %s", exc)
+
+            thread = _threading.Thread(target=_auto_consolidate_run, daemon=True)
+            thread.start()
+    except Exception as e:
+        logger.warning("自动 consolidate 触发失败（不影响会话）: %s", e)
+
     console.print("[dim]再见。[/dim]")
+
+
+def _show_consolidate_pending(config) -> None:
+    """显示自动 consolidate 暂存待审查的草稿。"""
+    from datetime import datetime as _dt
+    import json as _json
+    from pathlib import Path as _Path
+
+    pending_path = _Path(config.path(config.paths.history_dir)) / "consolidate_pending.jsonl"
+    if not pending_path.exists():
+        console.print("[dim]没有待审查的草稿。[/dim]")
+        return
+
+    entries = []
+    for line in pending_path.read_text(encoding="utf-8").strip().split("\n"):
+        if not line.strip():
+            continue
+        entries.append(_json.loads(line))
+
+    if not entries:
+        console.print("[dim]没有待审查的草稿。[/dim]")
+        return
+
+    console.print(f"[bold]待审查草稿（共 {len(entries)} 条）[/bold]")
+    for idx, entry in enumerate(entries, 1):
+        ts = _dt.fromtimestamp(entry["ts"])
+        console.print(f"\n--- #{idx}  {ts:%m-%d %H:%M} ---")
+        drafts = entry["drafts"]
+        for entry_text in drafts.get("memory_entries") or []:
+            console.print(f"  📝 记忆条目：{entry_text[:100]}")
+        hu = drafts.get("human_block_update")
+        if hu:
+            console.print(f"  👤 human 块更新（{len(hu)} 字）：{hu[:120]}...")
+        for sug in drafts.get("rule_suggestions") or []:
+            console.print(
+                f"  📋 规则建议「{sug.get('name')}」：{sug.get('reason', '')}"
+            )
+        for stale in drafts.get("stale_memories") or []:
+            console.print(f"  🗑  过时记忆：{stale[:80]}")
+
+    console.print("\n[dim]处理建议：[/dim]")
+    console.print("  - 运行 [bold]alfred consolidate[/bold] 逐项确认应用")
+    console.print("  - 或编辑 [dim]data/history/consolidate_pending.jsonl[/dim] 手动清理")
 
 
 def _remember(config, blocks: MemoryBlocks, content: str) -> None:

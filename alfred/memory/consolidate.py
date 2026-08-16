@@ -156,3 +156,48 @@ def apply_drafts(config: Config, drafts: dict,
                 pass
 
     return applied
+
+
+def apply_unattended(config: Config, drafts: dict) -> list[str]:
+    """无人值守模式：自动写入 lessons（不需用户确认），其余草稿暂存待审查。
+
+    返回已应用项的描述列表。暂存草稿写入 `data/history/consolidate_pending.jsonl`，
+    供 `/consolidate-review` 命令调出。
+    """
+    from pathlib import Path as _Path
+    import json as _json
+
+    applied: list[str] = []
+
+    # 1) lessons 自动写入
+    for item in drafts.get("lessons") or []:
+        category = item.get("category", "general")
+        lesson = item.get("lesson", "")
+        context = item.get("context", "")
+        if lesson:
+            try:
+                lessons_block = LessonsBlock(config)
+                result = lessons_block.add(category, lesson, context)
+                applied.append(f"RefleXion 教训：{result}")
+            except Exception:
+                pass
+
+    # 2) 其余草稿暂存
+    pending = {
+        k: v
+        for k, v in drafts.items()
+        if k not in ("lessons", "error") and v
+    }
+    if pending:
+        pending_path = (
+            _Path(config.path(config.paths.history_dir))
+            / "consolidate_pending.jsonl"
+        )
+        pending_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(pending_path, "a", encoding="utf-8") as f:
+            f.write(_json.dumps({
+                "ts": datetime.now().timestamp(),
+                "drafts": pending,
+            }) + "\n")
+
+    return applied

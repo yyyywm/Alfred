@@ -236,7 +236,13 @@ Alfred/
 - `episodic.py`：情景记忆四元组（场景/思路/行动/结果），存 LanceDB `episodes` 表，`search_episodes` 支持语义检索
 
 **整理：**
-- `consolidate.py`：sleep-time 整理，产出 memory_entries / human_block_update / rule_suggestions / stale_memories / lessons 五类草稿；前四类逐项确认后入库，lessons 自动写入（不经过用户确认）
+- `consolidate.py`：sleep-time 整理，产出 memory_entries / human_block_update / rule_suggestions / stale_memories / lessons 五类草稿；`apply_drafts` 逐项确认后入库，`apply_unattended` 无人值守模式自动写入 lessons、其余草稿暂存到 `data/history/consolidate_pending.jsonl` 待用户审查
+- `consolidate_state.py`：append-only JSONL 追踪对话轮数与最近复盘时间；`should_auto_consolidate()` 在 `chat` 退出时判断是否自动触发无人值守 consolidate（阈值：≥3 轮且距上次复盘 >24 小时），后台线程执行不阻塞退出
+
+**自动复盘流程**：
+1. 每轮对话结束追加一条 turn 记录到 `consolidate_state.jsonl`
+2. `/exit` 时检查是否满足自动条件 → 是则启动后台线程跑 `apply_unattended`
+3. 用户下次进入 chat 运行 `/consolidate-review` 查看暂存草稿，再手动 `alfred consolidate` 逐项确认
 
 ### 知识层（`alfred/knowledge/`）
 - `chunking.py`：按 Markdown 标题层级切分，保留标题路径前缀，解析 frontmatter
