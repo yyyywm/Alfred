@@ -4,7 +4,8 @@
 - Letta sleep-time compute：后台用强模型把原始对话转化为学习后的记忆
 - Devin Knowledge Suggestions：从反馈中沉淀知识，但生成的是"建议草稿"，
   由用户确认——不做全自动无确认的自我改写
-- 产物三类：长期记忆条目（mem0）/ 规则修订（rules/）/ human block 更新建议
+- 产物四类：长期记忆条目（mem0）/ 规则修订（rules/）/ human block 更新建议 /
+  情景记忆四元组（episodes）
 - mem0 v3 开源版 ADD-only 的整合缺口在此补足：复盘时对矛盾记忆给出处理建议
 """
 
@@ -13,6 +14,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from pydantic_ai import Agent
 
@@ -29,10 +31,11 @@ CONSOLIDATE_INSTRUCTIONS = """你是私人管家的"睡眠整理"模块。你的
 输出严格的 JSON（不要输出任何其他内容）：
 {
   "memory_entries": ["值得写入长期记忆的事实，每条一句，用第三人称描述用户", ...],
-  "human_block_update": "若对用户的整体认知有变化，给出 human 块的完整新内容；无变化则为 null",
+  "human_block_update": "若对用户的整体认知有变化，给出 human 块的完整新内容（保持原有章节结构）；无变化则为 null",
   "rule_suggestions": [{"name": "规则名", "content": "规则正文", "reason": "为什么建议"}],  // 用户反复纠正管家的行为模式才提
   "stale_memories": ["与最新信息矛盾的已有记忆原文"],  // 供用户确认后删除
-  "lessons": [{"category": "场景类别", "lesson": "一句教训", "context": "触发场景"}]  // RefleXion：从问题中提炼的经验
+  "lessons": [{"category": "场景类别", "lesson": "一句教训", "context": "触发场景"}],  // RefleXion：从问题中提炼的经验
+  "episodes": [{"situation": "场景", "thoughts": "思路", "action": "行动", "result": "结果"}]  // 成功的处理案例（四元组），只有确认成功完成任务时才产出
 }
 
 提炼标准：
@@ -159,13 +162,23 @@ def apply_drafts(config: Config, drafts: dict,
 
 
 def apply_unattended(config: Config, drafts: dict) -> list[str]:
-    """无人值守模式：自动写入 lessons（不需用户确认），其余草稿暂存待审查。
+    """无人值守模式：自动写入 lessons / memory_entries / episodes，
+    human_block_update 视改动大小自动或待审，其余草稿暂存待审查。
 
-    返回已应用项的描述列表。暂存草稿写入 `data/history/consolidate_pending.jsonl`，
-    供 `/consolidate-review` 命令调出。
+    策略：
+    - lessons：无脑写（RefleXion 教训，agent 自改进，不需要用户确认）
+    - memory_entries：无脑写（用户事实沉淀，ADD-only，风险低）
+    - episodes：无脑写（情景记忆四元组，结构化案例，风险低）
+    - human_block_update：改动 ≤ AUTO_HUMAN_UPDATE_MAX_CHARS 直接写，
+      否则降级为 pending 待用户下次 /consolidate-review 确认
+    - rule_suggestions / stale_memories：始终待审
+
+    返回已应用项的描述列表。暂存草稿写入 data/history/consolidate_pending.jsonl，
+    供 /consolidate-review 命令调出。
     """
     from pathlib import Path as _Path
     import json as _json
+    from .consolidate_state import AUTO_HUMAN_UPDATE_MAX_CHARS
 
     applied: list[str] = []
 
@@ -182,12 +195,60 @@ def apply_unattended(config: Config, drafts: dict) -> list[str]:
             except Exception:
                 pass
 
-    # 2) 其余草稿暂存
-    pending = {
-        k: v
-        for k, v in drafts.items()
-        if k not in ("lessons", "error") and v
-    }
+    # 2) memory_entries 自动写入（用户事实沉淀，非敏感）
+    for entry in drafts.get("memory_entries") or []:
+        try:
+            mem = longterm.get_memory(config)
+            if mem is not None:
+                mem.add([{"role": "user", "content": entry}], user_id=longterm.USER_ID)
+                applied.append(f"记忆条目：{entry[:50]}")
+        except Exception:
+            pass
+
+    # 3) episodes 自动写入（情景记忆四元组）
+    from .episodic import Episode, save_episode as _do_save_episode
+
+    for item in drafts.get("episodes") or []:
+        try:
+            ep = Episode(
+                situation=item.get("situation", ""),
+                thoughts=item.get("thoughts", ""),
+                action=item.get("action", ""),
+                result=item.get("result", ""),
+            )
+            if ep.situation and ep.result:
+                _do_save_episode(config, ep)
+                applied.append(f"情景记忆：{ep.situation[:30]}")
+        except Exception:
+            pass
+
+    # 4) human_block_update：按改动大小决定
+    human_update = drafts.get("human_block_update")
+    pending: dict[str, Any] = {}
+    if human_update:
+        try:
+            blocks = MemoryBlocks(config)
+            current = blocks.read("human")
+            # 简单启发式：新内容长度 - 当前已有实质内容长度（扣除模板占位）
+            current_real = len(
+                current.replace("_（", "").replace("）_", "").replace("# ", "")
+                .replace("\n", "")
+            )
+            delta = max(0, len(human_update) - current_real)
+            if delta <= AUTO_HUMAN_UPDATE_MAX_CHARS:
+                result = blocks.update("human", human_update, reason="auto-consolidate")
+                applied.append(f"human 块已更新（{result}）")
+            else:
+                pending["human_block_update"] = human_update
+        except Exception:
+            pending["human_block_update"] = human_update
+
+    # 5) 其余草稿暂存
+    if drafts.get("rule_suggestions"):
+        pending["rule_suggestions"] = drafts["rule_suggestions"]
+    if drafts.get("stale_memories"):
+        pending["stale_memories"] = drafts["stale_memories"]
+
     if pending:
         pending_path = (
             _Path(config.path(config.paths.history_dir))

@@ -19,6 +19,10 @@ from pathlib import Path
 AUTO_CONSOLIDATE_MIN_TURNS = 3
 AUTO_CONSOLIDATE_MIN_HOURS = 24
 
+# 无人值守模式下 human 块自动更新的阈值：新增内容超过此字符数时，
+# 视为"改动较大"，降级为 pending 待审而非直接写入（避免漂移）。
+AUTO_HUMAN_UPDATE_MAX_CHARS = 500
+
 
 def _state_path(config) -> Path:
     return config.path(config.paths.history_dir) / "consolidate_state.jsonl"
