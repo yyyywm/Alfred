@@ -1,15 +1,15 @@
-"""Skills 加载器：三级披露 + 主动匹配。
+"""Skills 加载器：三级披露。
 
 三级披露：
-  ① 启动时只注入 name+description（~100 tokens/skill）——刚好够判断"何时该用"
-  ② agent 判定相关后用 file_read 工具读 SKILL.md 正文
+  ① 启动时只注入 name+description（索引层）——刚好够 LLM 判断"何时该用"
+  ② agent 判定相关后自动将全文注入 prompt（LLM 从真实流程文本推理）
   ③ SKILL.md 按名引用同目录资源文件，agent 按需再读
 
-主动匹配（基于 SkillRet / SkillFlow / Skill-Use 论文）：
-  - SkillMeta 含 triggers（关键词列表），与用户输入做 OR 匹配
-  - 匹配的 skill 全文注入 prompt（LLM 从真实流程文本推理，不是模板匹配）
-  - 后置兜底：TurnEnd 检查匹配的 skill 是否被 file_read 读取过，
-    没读过则发 SkillSuggested 事件提醒用户
+**关键设计**：不做前端关键词匹配。匹配判断交给 LLM 从 description 推理完成。
+原因：
+  - 前端关键词匹配是模板化逻辑，无法理解语义（n-gram "开发" 会误命中 brandkit）
+  - description 本身已经写了触发场景（"当用户要 X 时使用"），LLM 能读懂
+  - 保持对第三方 skill 的零侵入——只读 name + description，不要求额外字段
 """
 
 from __future__ import annotations
@@ -24,20 +24,12 @@ from ..config import Config
 
 FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
-# 单次注入的 skill 上限（防止 prompt 膨胀）
-_MAX_INJECTED = 3
-
 
 @dataclass
 class SkillMeta:
     name: str
     description: str
     path: Path  # SKILL.md 的路径
-    triggers: list[str]  # 触发关键词列表，匹配用户输入时全文注入
-
-    @property
-    def dir(self) -> Path:
-        return self.path.parent
 
 
 def parse_skill_md(path: Path) -> SkillMeta | None:
@@ -52,18 +44,8 @@ def parse_skill_md(path: Path) -> SkillMeta | None:
     name = meta.get("name") or path.parent.name
     description = str(meta.get("description", "")).strip()
     if not description:
-        return None  # description 是触发判据，缺失的 skill 不注入
-    triggers_raw = meta.get("triggers", [])
-    triggers: list[str] = []
-    if isinstance(triggers_raw, list):
-        triggers = [str(t).strip().lower() for t in triggers_raw if str(t).strip()]
-    elif isinstance(triggers_raw, str):
-        triggers = [triggers_raw.strip().lower()]
-    # description 也作为触发源（避免写 triggers 的用户被排除）
-    desc_lower = description.lower()
-    triggers.extend(desc_lower.split())
-    triggers.extend(desc_lower.split("，"))
-    return SkillMeta(name=name, description=description, path=path, triggers=triggers)
+        return None
+    return SkillMeta(name=name, description=description, path=path)
 
 
 def scan_skills(config: Config) -> list[SkillMeta]:
@@ -80,57 +62,22 @@ def scan_skills(config: Config) -> list[SkillMeta]:
     return list(seen.values())
 
 
-def match_skills(skills: list[SkillMeta], user_input: str) -> list[SkillMeta]:
-    """基于关键词匹配用户输入。返回匹配的 skill 列表（最多 _MAX_INJECTED 个）。
-
-    匹配规则：user_input 中包含任一 trigger 关键词即匹配（OR 逻辑，宁多勿少）。
-    不做评分/排序——保持简单，后续 SkillSuggested 兜底机制保证漏匹配也能补救。
-    """
-    text = user_input.lower()
-    matched: list[SkillMeta] = []
-    for s in skills:
-        for kw in s.triggers:
-            if len(kw) < 2:  # 跳过单字（噪声太高）
-                continue
-            if kw in text:
-                matched.append(s)
-                break
-    return matched[:_MAX_INJECTED]
-
-
 def render_skills_index(skills: list[SkillMeta]) -> str:
-    """注入 system prompt 的索引文本（三级披露的入口）。"""
+    """注入 system prompt 的索引文本（三级披露的入口）。
+
+    这是唯一的注入方式。索引包含每个 skill 的 name + description + file path，
+    由 LLM 自行判断任务是否与某个 skill 相关，相关则用 file_read 读取全文。
+    """
     if not skills:
         return ""
     lines = [
         "## 可用技能（skills）",
-        "以下是你的技能索引。当任务与某个技能的描述匹配时，先用 file_read 工具读取其 SKILL.md 全文，再按其中的流程执行。",
+        "以下是你具备的技能。当用户任务与某个技能的描述匹配时，请用 file_read 工具读取其 SKILL.md 全文，然后按其中的流程执行。不需要用户主动要求，你自己判断并用。",
         "",
     ]
     for s in skills:
-        triggers_str = f" 触发词：{', '.join(s.triggers[:5])}" if s.triggers else ""
-        lines.append(f"- **{s.name}**：{s.description}{triggers_str}（文件：{s.path}）")
+        lines.append(f"- **{s.name}**：{s.description}（文件：{s.path}）")
     return "\n".join(lines)
-
-
-def render_injected_skills(skills: list[SkillMeta]) -> str:
-    """把匹配的 skill 全文注入 prompt（LLM 从真实流程文本推理）。"""
-    if not skills:
-        return ""
-    parts = ["## 当前任务匹配的技能（请阅读并遵循以下流程）", ""]
-    for s in skills:
-        try:
-            body = s.path.read_text(encoding="utf-8")
-            # 去掉 frontmatter，只保留正文
-            m = FRONTMATTER_RE.match(body)
-            if m:
-                body = body[m.end():].strip()
-        except OSError:
-            body = f"（无法读取 {s.path}）"
-        parts.append(f"### {s.name} — {s.description}")
-        parts.append(body)
-        parts.append("")
-    return "\n".join(parts)
 
 
 def find_skill(config: Config, name: str) -> SkillMeta | None:

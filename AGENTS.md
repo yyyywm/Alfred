@@ -308,10 +308,9 @@ python -m pytest tests/ -q
 ## 扩展机制
 
 ### Skills
-- 格式：`skills/<name>/SKILL.md`，YAML frontmatter（`name`、`description`、`triggers`）+ Markdown 正文
-- **主动匹配**：基于用户输入关键词匹配 `triggers`，匹配的 skill 全文自动注入 prompt（前置触发）
-- **后置兜底**：匹配但未被 agent 读取的 skill 发出 `SkillSuggested` 事件软提示
-- 每次最多注入 3 个 skill；单次最多匹配 3 个（防止 prompt 膨胀）
+- 格式：`skills/<name>/SKILL.md`，YAML frontmatter（`name`、`description`）+ Markdown 正文，符合 Anthropic Agent Skills 标准
+- 启动时将每个 skill 的 name + description 注入系统 prompt，LLM 自行判断任务是否匹配
+- 不要求任何额外字段（零侵入），第三方 skill 拿来即用
 - 推荐正文分节：Procedure / Specifications / Advice / Forbidden Actions / Required from User
 - 扫描目录由 `config.yaml` 的 `paths.skills_dirs` 控制，项目级 `skills/` 优先于用户级 `~/.config/alfred/skills`
 
