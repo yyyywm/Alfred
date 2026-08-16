@@ -308,9 +308,12 @@ python -m pytest tests/ -q
 ## 扩展机制
 
 ### Skills
-- 格式：`skills/<name>/SKILL.md`，YAML frontmatter（`name`、`description`）+ Markdown 正文，符合 Anthropic Agent Skills 标准
-- 启动时将每个 skill 的 name + description 注入系统 prompt，LLM 自行判断任务是否匹配
-- 不要求任何额外字段（零侵入），第三方 skill 拿来即用
+- 格式：`skills/<name>/SKILL.md`，YAML frontmatter + Markdown 正文
+- 必填字段：`name`、`description`
+- 可选字段（零侵入，仿 Kimi Code skill 机制）：
+  - `when-to-use`：触发场景的精确描述，注入索引时单独标注为"触发：…"，辅助 LLM 判断是否调用
+  - `disable-model-invocation: true`：标记为"仅用户主动触发"，注入索引时单独归类并附显式禁令，LLM 不会自动调用
+- 启动时将每个 skill 的 name + description + when-to-use 注入系统 prompt，LLM 自行判断任务是否匹配
 - 推荐正文分节：Procedure / Specifications / Advice / Forbidden Actions / Required from User
 - 扫描目录由 `config.yaml` 的 `paths.skills_dirs` 控制，默认 `skills/`
 

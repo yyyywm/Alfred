@@ -61,6 +61,34 @@ def test_project_skills_discovered():
     assert "framework-distiller" in names
 
 
+def test_skill_when_to_use_in_index(tmp_path):
+    d = tmp_path / "skills" / "wtu-skill"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        "---\nname: wtu-skill\ndescription: 一个技能\nwhen-to-use: 当用户明确要求时使用\n---\n正文\n",
+        encoding="utf-8",
+    )
+    skills = scan_skills(_config(tmp_path))
+    assert skills[0].when_to_use == "当用户明确要求时使用"
+    index = render_skills_index(skills)
+    assert "触发：" in index
+    assert "当用户明确要求时使用" in index
+
+
+def test_skill_disable_model_invocation(tmp_path):
+    d = tmp_path / "skills" / "user-only"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        "---\nname: user-only\ndescription: 只能用户手动触发\ndisable-model-invocation: true\n---\n正文\n",
+        encoding="utf-8",
+    )
+    skills = scan_skills(_config(tmp_path))
+    assert skills[0].disable_model_invocation is True
+    index = render_skills_index(skills)
+    assert "不得自行调用" in index
+    assert "user-only" in index
+
+
 def test_rules_four_triggers(tmp_path):
     d = tmp_path / "rules"
     d.mkdir()
