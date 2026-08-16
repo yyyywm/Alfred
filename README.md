@@ -208,8 +208,8 @@ memory:
 paths:
   history_dir: data/history
   vectordb_dir: data/vectordb
-  skills_dirs: [skills, ~/.config/alfred/skills]
-  rules_dirs: [rules, ~/.config/alfred/rules]
+  skills_dirs: [skills]
+  rules_dirs: [rules]
 ```
 
 ### 关键配置原则
@@ -226,7 +226,7 @@ paths:
 
 - **索引注入**：启动时将每个 skill 的 name + description 注入系统 prompt，LLM 自行判断当前任务是否匹配
 - **零侵入**：不要求任何额外字段，任何第三方 skill 拿来即用
-- 扫描目录由 `paths.skills_dirs` 控制
+- 扫描目录由 `paths.skills_dirs` 控制，默认 `skills/`
 
 ### Rules（规则）
 

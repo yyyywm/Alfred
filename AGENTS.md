@@ -312,7 +312,7 @@ python -m pytest tests/ -q
 - 启动时将每个 skill 的 name + description 注入系统 prompt，LLM 自行判断任务是否匹配
 - 不要求任何额外字段（零侵入），第三方 skill 拿来即用
 - 推荐正文分节：Procedure / Specifications / Advice / Forbidden Actions / Required from User
-- 扫描目录由 `config.yaml` 的 `paths.skills_dirs` 控制，项目级 `skills/` 优先于用户级 `~/.config/alfred/skills`
+- 扫描目录由 `config.yaml` 的 `paths.skills_dirs` 控制，默认 `skills/`
 
 ### Rules
 - 格式：`rules/*.md`，含 YAML frontmatter

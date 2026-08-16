@@ -63,7 +63,6 @@ paths:
   vectordb_dir: data/vectordb
   skills_dirs:
     - skills
-    - ~/.config/alfred/skills
   rules_dirs:
     - rules
     - ~/.config/alfred/rules
