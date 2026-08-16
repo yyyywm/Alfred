@@ -61,67 +61,38 @@ _ALFRED_VERSION = "0.1.0"
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 ALFRED_LOGO = (
-    "  \u2588\u2588\u2588\u2588\u2588\u2588  Welcome to Alfred!"
+    "[bold]██████[/bold]  Welcome to Alfred!"
 )
 ALFRED_HELP_LINE = (
     "  Send /help for help information."
 )
 
-# 固定边框宽度（ASCII 列宽，CJK 按 2 列计），与 Kimi Code 风格一致
-_BANNER_WIDTH = 96
-
-
-def _visual_len(s: str) -> int:
-    """粗略估算字符串的终端视觉宽度。
-    - 半角 ASCII / box-drawing (╭─│): 1 列
-    - 全角 CJK / block elements (█▓▒░) / fullwidth forms: 2 列
-    """
-    width = 0
-    for ch in s:
-        cp = ord(ch)
-        if (0x2E80 <= cp <= 0x9FFF          # CJK
-                or 0xFF01 <= cp <= 0xFF60    # fullwidth forms
-                or 0x2580 <= cp <= 0x258F    # block elements (█▓▒░▆▄▌▐)
-                or cp in (0x2590, 0x2591)):  # heavy/light shade blocks
-            width += 2
-        else:
-            # ASCII + box-drawing (╭─│) render as 1 cell in terminals
-            width += 1
-    return width
-
-
-def _draw_box(lines: list[str]) -> str:
-    """用 Box Drawing 字符绘制一个居中的边框面板。"""
-    width = _BANNER_WIDTH
-    top = "\u256d" + "\u2500" * (width - 2) + "\u256e"
-    bot = "\u2570" + "\u2500" * (width - 2) + "\u256f"
-
-    def _pad(row: str) -> str:
-        visual = _visual_len(row)
-        remaining = width - 2 - visual  # 去掉左右边框
-        return "\u2502 " + row + (" " * max(remaining - 1, 0)) + "\u2502"
-
-    return "\n".join([top] + [_pad(l) for l in lines] + [bot])
-
 
 def _print_startup_banner(config: "Config", session_id: str, has_session: bool) -> None:
-    """渲染类似 Kimi Code 的启动面板。"""
+    """渲染类似 Kimi Code 的启动面板。Rich 自动处理宽度/对齐。"""
     session_text = session_id if has_session else "(will be created on your first message)"
 
-    lines = [
-        "",
-        ALFRED_LOGO,
-        ALFRED_HELP_LINE,
-        "",
-        f"  Directory: {_PROJECT_ROOT}",
-        f"  Session:   {session_text}",
-        f"  Model:     {config.models.chat}",
-        f"  Version:   {_ALFRED_VERSION}",
-        "",
-    ]
+    content = (
+        f"\n"
+        f"  {ALFRED_LOGO}\n"
+        f"  {ALFRED_HELP_LINE}\n"
+        f"\n"
+        f"  Directory: {_PROJECT_ROOT}\n"
+        f"  Session:   {session_text}\n"
+        f"  Model:     {config.models.chat}\n"
+        f"  Version:   {_ALFRED_VERSION}"
+    )
 
     console.print()
-    console.print(_draw_box(lines))
+    console.print(
+        Panel(
+            content,
+            border_style="cyan",
+            padding=(0, 1),
+            width=96,
+            expand=False,
+        )
+    )
     if not has_session:
         console.print(
             "\n[dim]  No session yet — one will be created on your first message.[/dim]\n"
@@ -274,12 +245,15 @@ def chat(
     # 会话内不变的数据，build_agent 时一次读好，避免每轮系统 prompt 渲染都触发 I/O
     _skill_index = render_skills_index(scan_skills(config))
     _lessons_text = _load_lessons_text(config)
+    _always_rules, _recall_rules = render_rules(scan_rules(config))
+    _rules_text = "\n\n".join(t for t in (_always_rules, _recall_rules) if t)
     deps = AlfredDeps(
         config=config,
         blocks=blocks,
         confirm=_confirm,
         skill_index=_skill_index,
         lessons_text=_lessons_text,
+        rules_text=_rules_text,
     )
     logger = _setup_chat_logger(config, debug=debug)
 

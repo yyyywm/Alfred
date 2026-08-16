@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -124,7 +125,28 @@ def render_skills_index(skills: list[SkillMeta]) -> str:
 
 
 def find_skill(config: Config, name: str) -> SkillMeta | None:
-    for s in scan_skills(config):
+    for s in _get_all_skills(config):
         if s.name == name:
             return s
     return None
+
+
+# ── 缓存：避免 find_skill 每次调用都扫磁盘 ────────────────────────────
+# find_skill 之前每次都调 scan_skills（60 个文件 ~50 ms）。
+# 这里用一个模块级时间缓存：首调扫磁盘，之后 1 秒内复用，
+# 1 秒外重建（容纳用户手动新增 skill 文件的场景）。
+
+_skills_cache: list[SkillMeta] | None = None
+_skills_cache_at: float = 0.0  # monotonic 时间
+
+
+def _get_all_skills(config: Config) -> list[SkillMeta]:
+    """返回缓存的 skills 列表。"""
+    global _skills_cache, _skills_cache_at
+    now = time.monotonic()
+    if _skills_cache is not None and now - _skills_cache_at < 1.0:
+        return _skills_cache
+    skills = scan_skills(config)
+    _skills_cache = skills
+    _skills_cache_at = now
+    return skills

@@ -92,6 +92,8 @@ class AlfredDeps:
     # 预加载缓存：技能索引 + 教训文本（build_agent 时一次性读好，避免每轮 I/O）
     skill_index: str = ""
     lessons_text: str = ""
+    # 规则层：常驻规则 + 可召回规则索引，build_agent 时一次读好
+    rules_text: str = ""
 
 
 # 单轮工具调用硬上限
@@ -306,8 +308,9 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
 
     @agent.system_prompt
     def inject_rules(ctx: RunContext[AlfredDeps]) -> str:
-        always, index = render_rules(scan_rules(ctx.deps.config))
-        return "\n\n".join(t for t in (always, index) if t)
+        # 规则索引在 build_agent 时已经扫描渲染好，直接返回缓存，
+        # 避免每轮对话都触发磁盘扫描（rules 目录膨胀时此处线性增长）。
+        return ctx.deps.rules_text
 
     @agent.system_prompt
     def inject_date(ctx: RunContext[AlfredDeps]) -> str:
@@ -688,6 +691,7 @@ def chat_turn_stream(
         code_patch_count=0,
         skill_index=deps.skill_index,
         lessons_text=deps.lessons_text,
+        rules_text=deps.rules_text,
     )
 
     error_holder: list[Exception] = []
