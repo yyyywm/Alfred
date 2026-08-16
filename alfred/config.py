@@ -83,7 +83,7 @@ class MemoryConfig(BaseModel):
 class PathsConfig(BaseModel):
     history_dir: str = "data/history"
     vectordb_dir: str = "data/vectordb"
-    skills_dirs: list[str] = ["skills"]
+    skills_dirs: list[str] = ["~/.agents/skills"]
     rules_dirs: list[str] = ["rules"]
 
 

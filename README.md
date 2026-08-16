@@ -208,8 +208,8 @@ memory:
 paths:
   history_dir: data/history
   vectordb_dir: data/vectordb
-  skills_dirs: [skills]
-  rules_dirs: [rules]
+  skills_dirs: [~/.agents/skills]
+    rules_dirs: [rules]
 ```
 
 ### 关键配置原则
@@ -222,11 +222,14 @@ paths:
 
 ### Skills（技能）
 
-在 `skills/<name>/SKILL.md` 创建技能文件，含 YAML frontmatter（`name`、`description`）+ Markdown 正文，符合 Anthropic Agent Skills 标准格式。
+技能统一存放在用户级目录 `~/.agents/skills/`，所有 Hermes 项目共享同一份 skill 库。
+
+在 `~/.agents/skills/<name>/SKILL.md` 创建技能文件，含 YAML frontmatter（`name`、`description`）+ Markdown 正文，符合 Anthropic Agent Skills 标准格式。
 
 - **索引注入**：启动时将每个 skill 的 name + description 注入系统 prompt，LLM 自行判断当前任务是否匹配
 - **零侵入**：不要求任何额外字段，任何第三方 skill 拿来即用
-- 扫描目录由 `paths.skills_dirs` 控制，默认 `skills/`
+- 扫描目录由 `paths.skills_dirs` 控制，默认 `~/.agents/skills`
+- **统一存储**：Alfred 不再维护项目级 `skills/` 目录，skill 即用户资产，跨项目复用
 
 ### Rules（规则）
 

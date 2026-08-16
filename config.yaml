@@ -62,7 +62,7 @@ paths:
   history_dir: data/history
   vectordb_dir: data/vectordb
   skills_dirs:
-    - skills
+    - ~/.agents/skills
   rules_dirs:
     - rules
     - ~/.config/alfred/rules

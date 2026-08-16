@@ -54,7 +54,7 @@ def test_skill_without_description_skipped(tmp_path):
 
 
 def test_project_skills_discovered():
-    """项目内置的两个 skill 应能被发现。"""
+    """用户级 skills 目录（~/.agents/skills）应能被发现并加载内置 skill。"""
     skills = scan_skills(Config())
     names = {s.name for s in skills}
     assert "software-dev-workflow" in names

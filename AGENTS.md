@@ -121,10 +121,6 @@ Alfred/
 │       ├── loader.py       # 扫描 rules/*.md、frontmatter 触发器
 │       └── __init__.py
 │
-├── skills/                 # 项目级 skills（用户/项目均可扩展）
-│   ├── software-dev-workflow/SKILL.md
-│   └── framework-distiller/SKILL.md
-│
 ├── rules/                  # 项目级规则文件
 │   └── communication-style.md
 │
@@ -308,14 +304,15 @@ python -m pytest tests/ -q
 ## 扩展机制
 
 ### Skills
-- 格式：`skills/<name>/SKILL.md`，YAML frontmatter + Markdown 正文
+- 格式：`~/.agents/skills/<name>/SKILL.md`，YAML frontmatter + Markdown 正文
 - 必填字段：`name`、`description`
 - 可选字段（零侵入，仿 Kimi Code skill 机制）：
   - `when-to-use`：触发场景的精确描述，注入索引时单独标注为"触发：…"，辅助 LLM 判断是否调用
   - `disable-model-invocation: true`：标记为"仅用户主动触发"，注入索引时单独归类并附显式禁令，LLM 不会自动调用
 - 启动时将每个 skill 的 name + description + when-to-use 注入系统 prompt，LLM 自行判断任务是否匹配
 - 推荐正文分节：Procedure / Specifications / Advice / Forbidden Actions / Required from User
-- 扫描目录由 `config.yaml` 的 `paths.skills_dirs` 控制，默认 `skills/`
+- 扫描目录由 `config.yaml` 的 `paths.skills_dirs` 控制，默认 `~/.agents/skills`
+- 项目级 `skills/` 目录已废弃：skill 即用户资产，统一放在 `~/.agents/skills/` 跨项目复用
 
 ### Rules
 - 格式：`rules/*.md`，含 YAML frontmatter
