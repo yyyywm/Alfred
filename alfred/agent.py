@@ -65,6 +65,7 @@ INSTRUCTIONS = """你是用户的私人管家——也是秘书和朋友。你�
 - 需要回忆时用 memory_search；用户提到自己笔记里可能有的内容时用 notes_search
 - 回答个性化问题时，说明你依据了哪些记忆（用户有权知道）
 - **主动提及，不要等问**：当你已经知道的信息会帮助用户做更好的决定时（比如用户要选书而你记得 TA 读过的相关书、用户要排计划而你记得 TA 的作息、用户要讨论某个话题而你了解 TA 的立场），主动说出来，不要等用户追问才知道你知道。这是管家和搜索引擎的区别——管家应该替用户把相关背景带到桌上。
+- **情景记忆要主动写**：当你成功完成了一个有代表性的任务（成功 debug、给用户提出了被采纳的方案、解决了棘手问题），用 `save_episode` 把经验存下来（场景/思路/行动/结果），下次类似情况会自动召回借鉴。只保存**成功**的案例。
 - 探讨问题时：先理解真实意图，再给结构化观点，必要时用思维框架分析
 
 ## 工具准则
@@ -592,10 +593,40 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
 
         return do_patch(path, old_string, new_string)
 
+    # ── 情景记忆写入 ────────────────────────────────────────────────
+    # 让 agent 在成功完成任务后主动把经验沉淀为四元组，补全情景记忆
+
+    def save_episode(ctx: RunContext[AlfredDeps], situation: str,
+                     thoughts: str, action: str, result: str) -> str:
+        """记录一条成功的处理案例（情景记忆四元组）。
+
+        当你完成了一个复杂/有代表性的任务（成功调试了一个 bug、给用户提出了
+        一个被采纳的方案、解决了某个棘手问题），用此工具保存为情景记忆，
+        下次遇到类似场景 agent 会自动检索借鉴。
+
+        Args:
+            situation: 当时面对的场景 / 用户想要什么
+            thoughts: 你怎样分析问题、关键判断
+            action: 具体采取了哪些步骤
+            result: 最终效果 / 用户反馈
+        """
+        from .memory.episodic import Episode, save_episode as do_save
+
+        ep = Episode(
+            situation=situation, thoughts=thoughts,
+            action=action, result=result,
+        )
+        try:
+            ep_id = do_save(ctx.deps.config, ep)
+            return f"情景记忆已保存 [{ep_id}]：{situation[:50]}"
+        except Exception as e:
+            return f"情景记忆保存失败：{e}"
+
     agent.tool(_wrap_tool(memory_search, "memory_search"))
     agent.tool(_wrap_tool(memory_update_block, "memory_update_block"))
     agent.tool(_wrap_tool(notes_search, "notes_search"))
     agent.tool(_wrap_tool(episodes_search, "episodes_search"))
+    agent.tool(_wrap_tool(save_episode, "save_episode"))
     agent.tool(_wrap_tool(file_read, "file_read"))
     agent.tool(_wrap_tool(create_goal, "create_goal"))
     agent.tool(_wrap_tool(update_goal, "update_goal"))

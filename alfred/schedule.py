@@ -3,11 +3,13 @@
 设计依据：
 - DeepSeek-Harness schedule_create/schedule_delete/schedule_list 工具
 - Alfred 当前 cronjob 只能由 Hermes 侧管理，agent 内部无法 self-schedule
-- 轻量实现：session-level JSON 文件持久化，不依赖外部 cron，由
-  Alfred 启动时（chat 命令）加载已到期任务注入 prompt 实现"定时提醒"。
+- 轻量实现：全局 JSONL 文件持久化，不依赖外部 cron，由
+  Alfred 启动时（chat 命令）与每轮对话前加载已到期任务注入 prompt 实现"定时提醒"。
+- 跨 session 全局化：一次创建的 schedule 在任意 session 都能看到和触发，
+  到期后全局标记 fired（而不是 session 独占），避免换 session 就丢失。
 
 注意：真正的定时执行仍需要 Hermes 侧 cron 触发；本模块负责 agent 侧的
-  声明与持久化。未来可对接 Hermes cronjob 实现"真正的定时执行"。
+声明与持久化。schedule_fire_pending 是全局入口，供 CLI 调用。
 """
 from __future__ import annotations
 
@@ -110,7 +112,11 @@ def schedule_delete(config: Config, schedule_id: str) -> dict[str, Any]:
 
 
 def schedule_list(config: Config, session_id: str | None = None) -> dict[str, Any]:
-    """列出所有定时任务。"""
+    """列出定时任务。
+
+    不传 session_id 时列出全部（跨 session 全局可见）；
+    传入时仅列该 session 的任务（兼容旧 agent 调用方式）。
+    """
     entries = _load_all(config)
     if session_id:
         entries = [e for e in entries if e.user_id == session_id]
@@ -119,6 +125,7 @@ def schedule_list(config: Config, session_id: str | None = None) -> dict[str, An
         due_dt = datetime.fromtimestamp(e.due_at, tz=timezone.utc)
         rows.append({
             "id": e.id[:8],
+            "session_id": e.user_id[:8],
             "description": e.description[:60],
             "due_at": due_dt.strftime("%Y-%m-%d %H:%M UTC"),
             "status": e.status,

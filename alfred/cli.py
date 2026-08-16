@@ -219,6 +219,26 @@ def chat(
     ))
     logger.info("会话开始: %s, 模型: %s, debug: %s", session.id, config.models.chat, debug)
 
+    # 检查是否有历史 session 遗留的到期定时任务（未在当前 session 触发过），
+    # 如果有，以首条用户输入的形式让 agent 主动处理
+    from .schedule import schedule_fire_pending as _fire_pending
+    fired_prompts = []
+    try:
+        fired_prompts = _fire_pending(config)
+    except Exception as exc:
+        logger.warning("启动时检查定时任务失败: %s", exc)
+    if fired_prompts:
+        combined = (
+            "【系统提醒】以下定时任务已到期，请你主动处理：\n"
+            + "\n".join(f"- {p}" for p in fired_prompts)
+        )
+        console.print(f"[bold cyan]⏰ {len(fired_prompts)} 条到期定时任务，将注入首条对话处理[/bold cyan]")
+        # 把首条提示追加到 prompt_session 之前的输入，通过 user_input 注入下一轮
+        # 简单做法：直接在下面 prompt 循环前注入一次
+        _initial_injection = combined
+    else:
+        _initial_injection = None
+
     prompt_session = PromptSession(
         "你: ",
         style=Style.from_dict({"prompt": "cyan bold"}),
@@ -229,12 +249,18 @@ def chat(
     _CONSOLIDATE_REMINDER_EVERY = 10
     listed_sessions: list[tuple[str, float, int]] = []
     while True:
-        try:
-            user_input = prompt_session.prompt().strip()
-        except (EOFError, KeyboardInterrupt):
-            break
-        if not user_input:
-            continue
+        # 若启动时有到期定时任务，注入为"首条用户输入"自动处理
+        if _initial_injection is not None:
+            user_input = _initial_injection
+            _initial_injection = None
+            console.print(f"[dim]（定时任务自动处理中…）[/dim]")
+        else:
+            try:
+                user_input = prompt_session.prompt().strip()
+            except (EOFError, KeyboardInterrupt):
+                break
+            if not user_input:
+                continue
 
         if user_input.startswith("/"):
             cmd, _, arg = user_input.partition(" ")
@@ -341,6 +367,24 @@ def chat(
             else:
                 console.print(f"[red]未知命令 {cmd}，输入 /help 查看。[/red]")
             continue
+
+        # 每轮对话前检查是否有到期未触发的定时任务——注入本轮上下文，
+        # 让 agent 有机会主动处理（这是 Alfred "主动行为"的入口）
+        pending_schedule_prompts = []
+        try:
+            from .schedule import schedule_fire_pending
+            pending_schedule_prompts = schedule_fire_pending(config)
+        except Exception as exc:
+            logger.warning("检查定时任务失败: %s", exc)
+        if pending_schedule_prompts:
+            injected = (
+                f"\n\n[系统：以下 {len(pending_schedule_prompts)} 条定时任务已到期，"
+                f"请主动处理]\n"
+                + "\n".join(f"- {p}" for p in pending_schedule_prompts)
+            )
+            user_input = user_input + injected
+            for p in pending_schedule_prompts:
+                console.print(f"[dim]⏰ 定时任务已到期：{p[:60]}[/dim]")
 
         # 分隔用户输入与助手输出
         console.print()
