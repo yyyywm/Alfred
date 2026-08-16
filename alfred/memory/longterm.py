@@ -119,9 +119,22 @@ def _should_extract(user_msg: str, assistant_msg: str) -> bool:
 def add_async(
     config: Config, user_msg: str, assistant_msg: str, user_id: str | None = None,
 ) -> None:
-    """对话轮结束后台线程抽取记忆。"""
+    """对话轮结束后台线程抽取记忆。
+
+    对齐 LycheeMemory V2 (2608.12990) 的段级批处理思想：
+    每条消息附带 session 元信息，让 mem0 的 LLM 有更多上下文判断
+    哪些内容值得沉淀。同时把静默吞掉的错误改为 warning 日志，
+    让 mem0 故障可见。
+    """
     if not _should_extract(user_msg, assistant_msg):
         return
+
+    # 把会话上下文作为 metadata 传给 mem0，帮助它区分用户事实 vs agent 自我认知
+    metadata = {
+        "session": getattr(config, "_current_session", "unknown"),
+        "ts": datetime.now().isoformat(),
+        "role_types": "user_assistant_pair",
+    }
 
     def _run():
         import contextlib
@@ -139,9 +152,12 @@ def add_async(
                             {"role": "assistant", "content": assistant_msg},
                         ],
                         user_id=user_id or config.memory.default_user_id,
+                        metadata=metadata,
                     )
                 except Exception:
-                    pass
+                    logging.getLogger(__name__).warning(
+                        "mem0 记忆写入失败（用户消息: %s）", user_msg[:80]
+                    )
 
     threading.Thread(target=_run, daemon=True).start()
 

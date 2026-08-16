@@ -3,7 +3,6 @@
 封装 mem0 为 MemoryClient 协议，供 longterm.py 的 get_client() 工厂调用。
 当 memory.provider == "local" 时使用此实现。
 """
-
 from __future__ import annotations
 
 import os
@@ -78,6 +77,13 @@ def _build_mem0(config: Config):
     return Memory.from_config(mem_config)
 
 
+MEM0_EXTRACTION_PROMPT = (
+    "Extract facts about the user (identity, experiences, preferences, "
+    "projects, relationships, goals). Prioritize user-centric information. "
+    "Ignore agent-internal facts about tools, code changes, or system configuration."
+)
+
+
 class LocalMemoryClient(MemoryClient):
     """基于 mem0 的本地记忆客户端。"""
 
@@ -91,8 +97,15 @@ class LocalMemoryClient(MemoryClient):
         messages: list[dict[str, str]],
         *,
         user_id: str = "owner",
+        metadata: dict | None = None,
     ) -> None:
-        self._mem.add(messages, user_id=user_id)
+        # 显式引导 mem0 的提取方向：优先提取用户事实，忽略 agent 内部信息。
+        self._mem.add(
+            messages,
+            user_id=user_id,
+            metadata=metadata,
+            prompt=MEM0_EXTRACTION_PROMPT,
+        )
 
     def search(
         self,

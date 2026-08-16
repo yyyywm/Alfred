@@ -51,6 +51,56 @@ RefleXion 教训（lessons）提炼标准（Shinn et al. 2023）：
 - 没有可提炼的教训时，lessons 字段为空数组
 """
 
+import re as _re
+
+# 用户事实模式：从 memory_entries 中识别出真正关于用户的事实条目
+_USER_FACT_PATTERNS = (
+    r"用户", r"他叫", r"他是", r"她是",
+    r"喜欢", r"偏好", r"习惯",
+    r"是.*岁", r"来自", r"毕业", r"工作",
+    r"公众号", r"写.*博客", r"写.*公众号",
+    r"性格", r"MBTI", r"INFP", r"INTJ", r"ENFP",
+    r"关系", r"伴侣", r"家人",
+)
+# agent 自我认知 / 系统类，应排除
+_AGENT_FACT_PATTERNS = (
+    r"工具管线", r"code_patch", r"pytest", r"测试.*通过",
+    r"重构", r"改造", r"升级", r"实现",
+    r"ToolDeniedError", r"ToolExecutionPipeline",
+    r"memory_search", r"memory_update_block",
+)
+
+
+def _extract_user_facts_from_memories(entries: list[str]) -> list[str]:
+    """从 memory_entries 中筛选出纯用户事实，排除 agent 自我认知。"""
+    user_facts: list[str] = []
+    for entry in entries:
+        if any(_re.search(p, entry, _re.IGNORECASE) for p in _USER_FACT_PATTERNS):
+            if not any(_re.search(p, entry, _re.IGNORECASE) for p in _AGENT_FACT_PATTERNS):
+                user_facts.append(entry)
+    return user_facts
+
+
+def _apply_user_facts_to_human(config: Config, facts: list[str]) -> list[str]:
+    """把 user facts 增量追加到 human block。幂等：已存在不重复写。"""
+    blocks = MemoryBlocks(config)
+    current = blocks.read("human")
+    new_facts = [f for f in facts if f not in current]
+    if not new_facts:
+        return []
+    addition = "\n".join(f"- {f}" for f in new_facts)
+    updated = (
+        current.rstrip()
+        + "\n\n## 自动沉淀的用户事实（consolidate 自动写入）\n"
+        + addition
+        + "\n"
+    )
+    limit = blocks.limit_for("human")
+    if len(updated) > limit:
+        return [f"[跳过: 超出 human 块上限 {limit} 字符]" for _ in new_facts]
+    result = blocks.update("human", updated, reason="auto-consolidate: user facts from memory")
+    return [f"用户事实→human块：{r[:50]}" for r in new_facts]
+
 
 def _recent_transcripts(config: Config, days: int = 3, max_sessions: int = 5) -> str:
     """取最近几天的会话文本记录。"""
@@ -222,18 +272,31 @@ def apply_unattended(config: Config, drafts: dict) -> list[str]:
         except Exception:
             pass
 
+    # 3.5) memory_entries → human block 自动晋升（Updating operation）
+    #
+    # 仅当 LLM 没有产出 human_block_update 草稿时启用。
+    # 如果 LLM 已经生成了 human_block_update，说明它已经识别并整合了这些事实，
+    # 无需重复写入——走 4) 的整块替换路径即可。
+    #
+    # 对齐 Rethinking Memory (2505.00675) 的 Updating operation：
+    # mem0 层（implicit contextual）的发现触发 human block 层（explicit contextual）的更新。
+    human_update_draft = drafts.get("human_block_update")
+    _facts_promoted = []
+    if not human_update_draft:
+        _user_facts_from_memories = _extract_user_facts_from_memories(
+            drafts.get("memory_entries") or [],
+        )
+        if _user_facts_from_memories:
+            _facts_promoted = _apply_user_facts_to_human(config, _user_facts_from_memories)
+            applied.extend(_facts_promoted)
+
     # 4) human_block_update：按改动幅度决定
-    human_update = drafts.get("human_block_update")
+    human_update = human_update_draft
     pending: dict[str, Any] = {}
     if human_update:
         try:
             blocks = MemoryBlocks(config)
             current = blocks.read("human")
-            # 启发式：用绝对长度差异 |new - old_stripped| 判断改动幅度。
-            # old_stripped 减去模板占位符（_（...）_ 占位）与标题前缀，
-            # 近似得到"当前已有真实内容"的字符数。
-            # 使用 abs() 双向保护：大幅增长和大删减都走待审，
-            # 防止 LLM 把 1000 字画像重写为 200 字摘要时绕过保护。
             current_real = len(
                 current.replace("_（", "").replace("）_", "")
                 .replace("# ", "").replace("\n", "")
