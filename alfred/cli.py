@@ -336,6 +336,8 @@ def chat(
                             console.print(f"[red]会话不存在：{sid}[/red]")
             elif cmd == "/consolidate-review":
                 _show_consolidate_pending(config)
+            elif cmd in ("/audit", "/audit?"):
+                _run_audit(config)
             else:
                 console.print(f"[red]未知命令 {cmd}，输入 /help 查看。[/red]")
             continue
@@ -476,6 +478,19 @@ def chat(
         logger.warning("自动 consolidate 触发失败（不影响会话）: %s", e)
 
     console.print("[dim]再见。[/dim]")
+
+
+def _run_audit(config) -> None:
+    """在 chat 内运行记忆审计，输出富文本诊断报告。"""
+    from .memory.audit import audit as _do_audit
+    from .memory.audit import format_audit_human
+
+    try:
+        with console.status("[dim]审计中…[/dim]"):
+            report = _do_audit(config)
+        console.print(Markdown(format_audit_human(report)))
+    except Exception as e:
+        console.print(f"[red]审计失败：{e}[/red]")
 
 
 def _show_consolidate_pending(config) -> None:
@@ -758,6 +773,13 @@ def memory(
             console.print(f"  {line}")
     else:
         console.print("用法：alfred memory list | delete <id> | history [human|persona]")
+
+
+@app.command()
+def audit():
+    """记忆审计：诊断记忆库健康度、工具调用趋势、冷笔记、死规则。"""
+    config = load_config()
+    _run_audit(config)
 
 
 @app.command()

@@ -238,6 +238,8 @@ Alfred/
 **整理：**
 - `consolidate.py`：sleep-time 整理，产出 memory_entries / human_block_update / rule_suggestions / stale_memories / lessons 五类草稿；`apply_drafts` 逐项确认后入库，`apply_unattended` 无人值守模式自动写入 lessons、其余草稿暂存到 `data/history/consolidate_pending.jsonl` 待用户审查
 - `consolidate_state.py`：append-only JSONL 追踪对话轮数与最近复盘时间；`should_auto_consolidate()` 在 `chat` 退出时判断是否自动触发无人值守 consolidate（阈值：≥3 轮且距上次复盘 >24 小时），后台线程执行不阻塞退出
+- `audit.py`：记忆审计视图（`alfred audit` / `/audit`），诊断记忆库健康度、工具调用成功率、冷笔记、死规则、过期目标
+- `monitor.py`：自监控度量（工具调用/记忆召回/skill 使用按天统计），供未来可视化/告警接入
 
 **自动复盘流程**：
 1. 每轮对话结束追加一条 turn 记录到 `consolidate_state.jsonl`
