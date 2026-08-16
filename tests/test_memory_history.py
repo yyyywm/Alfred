@@ -3,7 +3,7 @@
 import time
 
 from alfred.config import Config
-from alfred.history import Session, delete_session
+from alfred.history import Session, delete_session, list_sessions
 from alfred.memory.recall import rank_memories, render_for_prompt
 
 
@@ -86,3 +86,28 @@ def test_delete_session(tmp_path):
     # 删除不存在的会话返回 False；路径穿越会被收敛为文件名
     assert delete_session(cfg, s.id) is False
     assert delete_session(cfg, "../outside") is False
+
+
+def test_list_sessions_excludes_meta_files(tmp_path):
+    """consolidate 元数据/待审草稿文件不应被当成会话历史列出。
+
+    回归：consolidate_pending.jsonl 的 drafts 字段曾导致
+    Session._load → Message(**record) 抛 TypeError。
+    """
+    cfg = _cfg(tmp_path)
+    # 正常会话
+    s = Session(cfg)
+    s.add_user("会话内容")
+    # meta 文件（模拟 consolidate 产物）
+    for name in ("consolidate_state.jsonl", "consolidate_pending.jsonl"):
+        (cfg.path(cfg.paths.history_dir) / name).write_text(
+            '{"drafts": {"x": 1}, "ts": 1}\n', encoding="utf-8"
+        )
+
+    sessions = list_sessions(cfg)
+    ids = {sid for sid, _m, _n in sessions}
+    assert ids == {s.id}
+    # 且 meta 文件不会导致下游解析崩溃
+    for sid, _m, _n in sessions:
+        sess = Session(cfg, session_id=sid)
+        assert len(sess.messages) == 1

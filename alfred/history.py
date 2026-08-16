@@ -131,12 +131,19 @@ class Session:
 
 
 def list_sessions(config: Config) -> list[tuple[str, float, int]]:
-    """返回 [(session_id, mtime, msg_count)]，按最近修改排序。"""
+    """返回 [(session_id, mtime, msg_count)]，按最近修改排序。
+
+    排除非会话 JSONL（consolidate 元数据/待审草稿），否则会被下游当成
+    会话历史解析而崩溃（drafts 字段不在 Message schema 内）。
+    """
     d = config.path(config.paths.history_dir)
     if not d.exists():
         return []
+    meta_files = {"consolidate_state.jsonl", "consolidate_pending.jsonl"}
     rows = []
     for f in d.glob("*.jsonl"):
+        if f.name in meta_files:
+            continue
         count = 0
         for line in f.read_text(encoding="utf-8").splitlines():
             if line.strip() and '"type": "llm_state"' not in line:
