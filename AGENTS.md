@@ -313,6 +313,13 @@ python -m pytest tests/ -q
 
 **约束**：测试不依赖真实 LLM 调用、不下载 embedding 模型、不访问外部 API。
 
+**真实链路冒烟**（手动，功能变更后建议执行）：
+1. `alfred models` 确认 chat/memory_write/embed 模型 key 配置
+2. `alfred ingest <小目录>` 验证 embedding + LanceDB 写入
+3. Python 驱动 `chat_turn_stream`（或 `alfred chat`）跑 2-3 轮真实对话，验证 LLM 调用 + memory_search + 工具执行
+4. `alfred audit` 验证记忆审计视图；`alfred consolidate` 验证复盘草稿生成
+5. 实测后清理测试污染（mem0 记忆、episodes 表、memory git 回滚）
+
 ## 安全与隐私
 
 - **数据本地优先**：所有记忆、笔记索引、会话历史默认存储在 `data/` 目录（已被 `.gitignore` 排除）。
@@ -367,6 +374,7 @@ data/
 - **换 embedding 模型必须重建索引**：`models.embed.name` 一旦确定不要轻易更换，否则 notes/frameworks/episodes 向量库需要全量重建。
 - **mem0 初始化失败会静默降级**：`longterm.py` 初始化失败会标记 `_init_failed`，后续记忆写入/召回都为空操作，不会阻塞对话。常见原因是 Qdrant 本地存储残留 `.lock` 文件（异常退出导致），`get_client` 已支持自动清理锁文件并重试一次。
 - **mem0 Qdrant 锁文件残留**：如果 `alfred memory list` 长期为空且对话看似有记忆（实际是会话历史），检查 `data/vectordb/qdrant_mem0/.lock` 是否存在。`get_client` 会自动清理，若仍失败可手动删除该文件后重启。
+- **consolidate 把元数据文件当会话读崩**：`consolidate_state.jsonl` / `consolidate_pending.jsonl` 与会话 JSONL 同目录，`list_sessions` 曾用裸 `*.jsonl` glob 把元数据文件列入，导致 `Message(**record)` 遇未知字段（如 `drafts`）抛 TypeError，`alfred consolidate` 与自动复盘必崩。已在 `history.py` 排除这两个文件名；**新增会话目录内 JSONL 类型时同步更新排除清单**。
 - **persona 和 human 修改都需要用户确认**：agent 调用 `memory_update_block(name="persona")` 或 `memory_update_block(name="human")` 时，若 `deps.confirm` 返回 False 则写入被拒绝。
 - **压缩会作废 llm_state**：`compaction.py` 蒸馏旧消息后调用 `session.rewrite()`，跨模型精确续跑回退为"摘要 + 近期消息"的种子上下文。压缩前已对长消息做过裁剪，蒸馏时不再二次截断。
 - **聊天内切换模型会重建 agent**：`/model provider:model` 会调用 `build_agent(config, arg)`，历史消息以归一化 transcript 做种子上下文。
