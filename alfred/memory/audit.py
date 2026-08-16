@@ -202,7 +202,7 @@ def audit(config, days: int = 90) -> MemoryAuditReport:
         from ..knowledge import embed as embed_mod
 
         db = knowledge_store.get_db(config)
-        if "notes" in db.table_names():
+        if "notes" in db.list_tables():
             notes = db.open_table("notes").to_list()
             all_sources = {r.get("source") for r in notes if r.get("source")}
             referenced: set[str] = set()
