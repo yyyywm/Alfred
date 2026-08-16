@@ -222,20 +222,24 @@ def apply_unattended(config: Config, drafts: dict) -> list[str]:
         except Exception:
             pass
 
-    # 4) human_block_update：按改动大小决定
+    # 4) human_block_update：按改动幅度决定
     human_update = drafts.get("human_block_update")
     pending: dict[str, Any] = {}
     if human_update:
         try:
             blocks = MemoryBlocks(config)
             current = blocks.read("human")
-            # 简单启发式：新内容长度 - 当前已有实质内容长度（扣除模板占位）
+            # 启发式：用绝对长度差异 |new - old_stripped| 判断改动幅度。
+            # old_stripped 减去模板占位符（_（...）_ 占位）与标题前缀，
+            # 近似得到"当前已有真实内容"的字符数。
+            # 使用 abs() 双向保护：大幅增长和大删减都走待审，
+            # 防止 LLM 把 1000 字画像重写为 200 字摘要时绕过保护。
             current_real = len(
-                current.replace("_（", "").replace("）_", "").replace("# ", "")
-                .replace("\n", "")
+                current.replace("_（", "").replace("）_", "")
+                .replace("# ", "").replace("\n", "")
             )
-            delta = max(0, len(human_update) - current_real)
-            if delta <= AUTO_HUMAN_UPDATE_MAX_CHARS:
+            delta = len(human_update) - current_real
+            if abs(delta) <= AUTO_HUMAN_UPDATE_MAX_CHARS:
                 result = blocks.update("human", human_update, reason="auto-consolidate")
                 applied.append(f"human 块已更新（{result}）")
             else:

@@ -662,8 +662,11 @@ def _show_whoami(config, blocks: MemoryBlocks) -> None:
     # ① 常驻记忆块
     human_text = blocks.read("human").strip()
     persona_text = blocks.read("persona").strip()
-    human_nonempty = "human" if human_text and "还没有关于用户" not in human_text else "空"
-    persona_nonempty = "persona" if persona_text and "还没有" not in persona_text else "空"
+    # 新模板用 _（...）_ 占位符表示"未填充"，检查是否仍是纯模板
+    human_is_placeholder = "_（" in human_text
+    persona_is_placeholder = "_（" in persona_text
+    human_nonempty = "human" if human_text and not human_is_placeholder else "空"
+    persona_nonempty = "persona" if persona_text and not persona_is_placeholder else "空"
 
     # ② 长期记忆
     memories = longterm.list_all(config)

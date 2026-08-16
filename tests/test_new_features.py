@@ -117,7 +117,7 @@ def test_apply_unattended_large_human_update_pending(tmp_path, monkeypatch):
         "dir": str(tmp_path / "mem"),
         "block_char_limit": 5000,
         "human_block_char_limit": 5000,
-    })
+    }, paths={"history_dir": str(tmp_path / "hist_large")})
     blocks = MemoryBlocks(cfg)
     blocks.update("human", "# Human Block\n## 基本资料\n小明", reason="seed")
 
@@ -130,11 +130,82 @@ def test_apply_unattended_large_human_update_pending(tmp_path, monkeypatch):
     }
     apply_unattended(cfg, drafts)
 
-    # 改动 > AUTO_HUMAN_UPDATE_MAX_CHARS，应降级 pending
-    pending_path = tmp_path / "mem_history" / "consolidate_pending.jsonl"
-    # 需要找到 history_dir 的实际路径
     hist_dir = cfg.path(cfg.paths.history_dir)
     pending_path = hist_dir / "consolidate_pending.jsonl"
     assert pending_path.exists(), "大改动 human 更新应被暂存"
     records = [json.loads(line) for line in pending_path.read_text(encoding="utf-8").splitlines()]
     assert records[0]["drafts"].get("human_block_update") == big_update
+
+
+def test_apply_unattended_shrink_human_update_pending(tmp_path, monkeypatch):
+    """human_block_update 大幅删减时也应降级 pending（防止 LLM 绕过保护）。
+
+    场景：已有 1000 字画像，LLM 想重写为 200 字摘要——delta 为负但绝对值大，
+    应走待审而非自动写入。
+    """
+    class MockMemory:
+        def add(self, msgs, user_id):
+            pass
+
+    def fake_get_memory(cfg):
+        return MockMemory()
+
+    from alfred.memory import longterm
+    monkeypatch.setattr(longterm, "get_memory", fake_get_memory)
+
+    cfg = Config(memory={
+        "dir": str(tmp_path / "mem"),
+        "block_char_limit": 5000,
+        "human_block_char_limit": 5000,
+    }, paths={"history_dir": str(tmp_path / "hist_shrink")})
+    blocks = MemoryBlocks(cfg)
+    # 填入约 1000 字"真实内容"
+    blocks.update("human", "# Human Block\n## 基本资料\n" + "真实内容 " * 120, reason="seed")
+
+    # 大幅缩减为短摘要（delta ≈ -780，abs > 500）
+    short_update = "## 基本资料\n短"
+    drafts = {
+        "lessons": [],
+        "memory_entries": [],
+        "human_block_update": short_update,
+        "episodes": [],
+    }
+    apply_unattended(cfg, drafts)
+
+    hist_dir = cfg.path(cfg.paths.history_dir)
+    pending_path = hist_dir / "consolidate_pending.jsonl"
+    assert pending_path.exists(), "大幅删减也应降级 pending"
+    records = [json.loads(line) for line in pending_path.read_text(encoding="utf-8").splitlines()]
+    assert records[0]["drafts"].get("human_block_update") == short_update
+
+
+# ── P1: schedule_fire_pending 跨 session ──────────────────────────────
+
+def test_schedule_fire_pending_fires_and_marks(tmp_path):
+    """到期任务应返回 prompt 并标记为 fired。"""
+    from alfred.schedule import schedule_create, schedule_fire_pending
+
+    cfg = Config(paths={"history_dir": str(tmp_path / "hist")})
+
+    result = schedule_create(cfg, "sess1", "task", "fire me!",
+                             due_at=0.0)
+    assert result["ok"]
+    assert "已创建" in result["message"]
+
+    prompts = schedule_fire_pending(cfg)
+    assert prompts == ["fire me!"]
+
+    assert schedule_fire_pending(cfg) == []
+
+
+def test_schedule_fire_pending_ignores_future(tmp_path):
+    """未到期的任务不应被 fire。"""
+    import time
+    from alfred.schedule import schedule_create, schedule_fire_pending
+
+    cfg = Config(paths={"history_dir": str(tmp_path / "hist")})
+    future = time.time() + 86400 * 7
+
+    schedule_create(cfg, "sess1", "future task", "future prompt",
+                    due_at=future)
+    assert schedule_fire_pending(cfg) == []
