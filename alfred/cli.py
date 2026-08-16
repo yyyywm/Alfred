@@ -403,6 +403,8 @@ def chat(
                             console.print(f"[red]会话不存在：{sid}[/red]")
             elif cmd == "/consolidate-review":
                 _show_consolidate_pending(config)
+            elif cmd == "/consolidate":
+                _run_chat_consolidate(config)
             elif cmd in ("/audit", "/audit?"):
                 _run_audit(config)
             else:
@@ -576,6 +578,31 @@ def _run_audit(config) -> None:
         console.print(Markdown(format_audit_human(report)))
     except Exception as e:
         console.print(f"[red]审计失败：{e}[/red]")
+
+
+def _run_chat_consolidate(config) -> None:
+    """在 chat 内运行 consolidate 复盘。
+
+    和 alfred consolidate CLI 命令等价，允许用户在对话中直接触发复盘。
+    """
+    from .memory.consolidate import apply_drafts, generate_drafts
+
+    with console.status("[dim]复盘中…[/dim]"):
+        drafts = generate_drafts(config)
+    if not drafts:
+        console.print("[dim]近期没有需要整理的对话。[/dim]")
+        return
+    if "error" in drafts:
+        console.print(f"[red]{drafts['error']}[/red]")
+        return
+
+    applied = apply_drafts(config, drafts, confirm=_confirm)
+    if applied:
+        console.print("[green]已应用：[/green]")
+        for a in applied:
+            console.print(f"  - {a}")
+    else:
+        console.print("[dim]没有应用任何草稿。[/dim]")
 
 
 def _show_consolidate_pending(config) -> None:
