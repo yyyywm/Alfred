@@ -21,6 +21,11 @@ providers:
     base_url: https://api.openai.com/v1
     env_key: OPENAI_API_KEY
     models: [gpt-4o, gpt-4o-mini]
+  shangtang:
+    type: openai_compat
+    base_url: https://token.sensenova.cn/v1
+    env_key: SHANGTANG_API_KEY
+    models: [sensenova-6.8-flash-lite,deepseek-v4-flash,glm-5.2]
   # anthropic:
   #   type: anthropic
   #   env_key: ANTHROPIC_API_KEY
@@ -33,9 +38,9 @@ providers:
 
 models:
   # 闲聊/对话路径：可自由切换（chat 中 /model <provider>:<model>）
-  chat: kimi-for-coding:k3
+  chat: shangtang:deepseek-v4-flash
   # 记忆写入路径（事实抽取、consolidate 复盘）：固定用强模型，质量敏感
-  memory_write: kimi-for-coding:k3
+  memory_write: shangtang:sensenova-6.8-flash-lite
   # embedding：本地模型或 OpenAI 兼容 API，选定后不要换（换 = 全量重建索引）
   embed:
     provider: openai_compat     # local（本地 sentence-transformers）或 openai_compat（云端 API）
