@@ -6,6 +6,7 @@ chat 内斜杠命令：
   /memory 查看长期记忆  /why 查看上一轮用了哪些记忆
   /sessions 列出历史会话  /load <序号或id> 加载历史会话  /delete <序号或id> 删除会话
   /lessons 查看管家从过去中学到的教训（RefleXion 教训库）
+  /trust 管理工具信任白名单（默认允许某类工具，不再每次询问）
   /whoami 查看 Alfred 的积累状态（记忆/教训/情景/笔记/框架）
   /status 检查当前模型与 embedding 连接
   /consolidate-review 查看自动复盘暂存的待审查草稿
@@ -114,11 +115,101 @@ def _load_lessons_text(config: Config) -> str:
     return f"# 你从过去中学到的教训（RefleXion 教训库）\n{text}"
 
 
-def _confirm(msg: str) -> bool:
-    """在工作线程中请求用户确认；避开 Rich Console 以减少线程竞争。"""
+class _ConfirmState:
+    """会话内工具信任状态。
+
+    trusted_tools: 用户明确允许过、后续可自动放行的工具名集合。
+    工具名来自 agent._confirm_prompt 中的四个危险工具：
+    shell / run_python / code_patch / memory_update_block。
+
+    语义：第一次允许某工具 → 该工具进入白名单 → 同会话内后续同类调用自动放行。
+    用户在 /trust 中可手动增删白名单条目，也可清除全部。
+    """
+    trusted_tools: set[str] = set()
+
+
+def _confirm(msg: str, tool_name: str | None = None) -> bool:
+    """在工作线程中请求用户确认；避开 Rich Console 以减少线程竞争。
+
+    若该工具已在白名单中，自动放行不再打扰用户。
+    用户回答 y/yes → 该工具加入白名单；回答其他 → 保持现状（下次仍问）。
+    """
+    # 白名单内自动放行
+    if tool_name is not None and tool_name in _ConfirmState.trusted_tools:
+        return True
     print(f"\n{'=' * 60}\n确认请求\n{'=' * 60}\n{msg}\n{'=' * 60}")
+    print("[dim]提示：回答 y 后本次会话内同类操作将自动放行（/trust 查看管理）[/dim]")
     answer = input("是否允许 [y/N]: ").strip().lower()
-    return answer in ("y", "yes")
+    allowed = answer in ("y", "yes")
+    if allowed and tool_name is not None:
+        _ConfirmState.trusted_tools.add(tool_name)
+    return allowed
+
+
+def _show_trust_state() -> None:
+    """/trust 命令：显示白名单状态与帮助。"""
+    from rich.panel import Panel
+    from rich.table import Table
+
+    tools_desc = {
+        "shell": "shell 命令执行",
+        "run_python": "Python 代码执行",
+        "code_patch": "自举进化（修改源代码）",
+        "memory_update_block": "修改记忆块（human/persona）",
+    }
+    table = Table(title="工具信任白名单（会话内有效）", show_header=False)
+    for name in ("shell", "run_python", "code_patch", "memory_update_block"):
+        desc = tools_desc[name]
+        status = "[green]✓ 已信任[/green]" if name in _ConfirmState.trusted_tools else "[dim]未信任[/dim]"
+        table.add_row(f"[bold]{name}[/bold]", desc, status)
+
+    console.print(Panel(table))
+    console.print("[dim]用法：[/dim]")
+    console.print("  [green]/trust add <tool>[/green]  手动信任某类工具")
+    console.print("  [red]/trust remove <tool>[/red]  移除信任，下次仍会询问")
+    console.print("  [yellow]/trust clear[/yellow]     清空白名单，全部回到手动确认")
+    console.print("  [cyan]/trust[/cyan]              查看当前状态（即此视图）")
+
+
+def _handle_trust(arg: str) -> None:
+    """/trust [add|remove|clear] <tool> — 管理工具信任白名单。"""
+    _VALID_TOOLS = {"shell", "run_python", "code_patch", "memory_update_block"}
+
+    parts = arg.split(maxsplit=1)
+    if not parts:
+        _show_trust_state()
+        return
+
+    sub = parts[0].lower()
+    tool = parts[1] if len(parts) > 1 else ""
+
+    if sub == "add":
+        if not tool:
+            console.print("用法：/trust add <tool>")
+            return
+        if tool not in _VALID_TOOLS:
+            console.print(f"[red]未知工具：{tool}[/red]")
+            return
+        _ConfirmState.trusted_tools.add(tool)
+        console.print(f"[green]已信任：{tool}[/green]（后续同类操作自动放行）")
+    elif sub == "remove":
+        if not tool:
+            console.print("用法：/trust remove <tool>")
+            return
+        if tool not in _ConfirmState.trusted_tools:
+            console.print(f"[dim]{tool} 未在白名单中。[/dim]")
+            return
+        _ConfirmState.trusted_tools.discard(tool)
+        console.print(f"[yellow]已移除信任：{tool}[/yellow]（下次调用仍需确认）")
+    elif sub == "clear":
+        if not _ConfirmState.trusted_tools:
+            console.print("[dim]白名单已为空。[/dim]")
+            return
+        _ConfirmState.trusted_tools.clear()
+        console.print("[green]已清空白名单。[/green]")
+    else:
+        console.print(f"[red]未知子命令：/trust {sub}[/red]")
+        return
 
 
 def _resolve_session_ref(config, ref: str, listed: list[tuple[str, float, int]]) -> str | None:
@@ -363,6 +454,8 @@ def chat(
                 _show_whoami(config, blocks)
             elif cmd == "/lessons":
                 _show_lessons(config, arg)
+            elif cmd == "/trust":
+                _handle_trust(arg)
             elif cmd == "/sessions":
                 listed_sessions = list_sessions(config)[:10]
                 if not listed_sessions:

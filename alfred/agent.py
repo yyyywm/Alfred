@@ -79,7 +79,7 @@ INSTRUCTIONS = """你是用户的私人管家——也是秘书和朋友。你�
 class AlfredDeps:
     config: Config
     blocks: MemoryBlocks | None
-    confirm: Callable[[str], bool] = lambda msg: False  # 默认拒绝
+    confirm: Callable[..., bool] = lambda msg: False  # 默认拒绝；支持 confirm(msg, tool_name=...)
     last_recalled: list[str] = field(default_factory=list)  # 本轮召回的记忆（/why 用）
     session_id: str = ""
     bus: EventBus = field(default_factory=EventBus)
@@ -116,9 +116,9 @@ class ToolExecutionPipeline:
             raise ToolLimitExceeded
 
     def confirm_gate(self, ctx, tool_name: str, kwargs: dict) -> None:
-        prompt = _confirm_prompt(tool_name, kwargs)
-        if prompt is not None and not ctx.deps.confirm(prompt):
-            raise ToolDeniedError("用户拒绝了该操作。")
+            prompt = _confirm_prompt(tool_name, kwargs)
+            if prompt is not None and not ctx.deps.confirm(prompt, tool_name=tool_name):
+                raise ToolDeniedError("用户拒绝了该操作。")
 
     def execute_body(self, fn, ctx, kwargs) -> str:
         """执行工具函数。支持 timeout_s 超时控制。"""

@@ -56,7 +56,7 @@ def test_chat_turn_stream_emits_events(tmp_path):
     agent.tool(_wrap_tool(greet, "greet"))
 
     session = Session(cfg)
-    deps = AlfredDeps(config=cfg, blocks=None, confirm=lambda _msg: True)
+    deps = AlfredDeps(config=cfg, blocks=None, confirm=lambda _msg, **_kw: True)
     bus = EventBus()
     collected = []
     bus.subscribe(collected.append)
@@ -113,7 +113,7 @@ def test_chat_turn_stream_preserves_text_across_tool_loop(tmp_path):
     agent.tool(_wrap_tool(greet, "greet"))
 
     session = Session(cfg)
-    deps = AlfredDeps(config=cfg, blocks=None, confirm=lambda _msg: True)
+    deps = AlfredDeps(config=cfg, blocks=None, confirm=lambda _msg, **_kw: True)
     events = list(chat_turn_stream(agent, deps, session, "say hi"))
 
     chunks = [e.delta for e in events if isinstance(e, AssistantChunk)]
@@ -188,7 +188,7 @@ def test_chat_turn_stream_emits_tool_denied(tmp_path):
     agent.tool(_wrap_tool(shell, "shell"))
 
     session = Session(cfg)
-    deps = AlfredDeps(config=cfg, blocks=None, confirm=lambda _msg: False)
+    deps = AlfredDeps(config=cfg, blocks=None, confirm=lambda _msg, **_kw: False)
     bus = EventBus()
     events = []
     bus.subscribe(events.append)
