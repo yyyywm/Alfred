@@ -53,6 +53,7 @@ from .memory import longterm
 from .memory.blocks import MemoryBlocks
 from .memory.lessons import LessonsBlock
 from .skills.loader import render_skills_index, scan_skills
+from .rules.loader import render_rules, scan_rules
 
 app = typer.Typer(help="私人管家 AI Agent", no_args_is_help=True)
 console = Console()
