@@ -543,13 +543,26 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
             )
         return "\n".join(lines)
 
+    def _decode_output(data: bytes) -> str:
+        """将子进程输出解码为字符串，UTF-8 优先，容错替换坏字节。
+
+        Windows 上 subprocess.text=True 默认用系统编码（GBK）解码 stdout，
+        子进程若输出中文直接抛 UnicodeDecodeError，且异常只在后台
+        _readerthread 中抛出，主进程看不到 —— 导致事件流中断、agent 卡死。
+        统一走 bytes + 显式 UTF-8 + errors=replace 规避该问题。
+        """
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            return data.decode("utf-8", errors="replace")
+
     def shell(ctx: RunContext[AlfredDeps], command: str) -> str:
         """执行 shell 命令（需用户确认）。用于文件操作、运行脚本等。"""
         try:
             proc = subprocess.run(
-                command, shell=True, capture_output=True, text=True, timeout=60
+                command, shell=True, capture_output=True, timeout=60
             )
-            out = (proc.stdout + proc.stderr).strip()
+            out = (_decode_output(proc.stdout) + _decode_output(proc.stderr)).strip()
             if len(out) > 5_000:
                 out = out[:5_000] + "\n[输出已截断]"
             return out or f"（命令执行完毕，无输出，退出码 {proc.returncode}）"
@@ -561,9 +574,9 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
         适合数据处理、计算、格式转换等确定性任务——用代码而非逐字生成。"""
         try:
             proc = subprocess.run(
-                [sys.executable, "-c", code], capture_output=True, text=True, timeout=60
+                [sys.executable, "-c", code], capture_output=True, timeout=60
             )
-            out = (proc.stdout + proc.stderr).strip()
+            out = (_decode_output(proc.stdout) + _decode_output(proc.stderr)).strip()
             if len(out) > 5_000:
                 out = out[:5_000] + "\n[输出已截断]"
             return out or "（执行完毕，无输出）"
