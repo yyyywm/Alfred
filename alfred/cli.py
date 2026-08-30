@@ -148,7 +148,6 @@ def _confirm(msg: str, tool_name: str | None = None) -> bool:
 
 def _show_trust_state() -> None:
     """/trust 命令：显示白名单状态与帮助。"""
-    from rich.panel import Panel
     from rich.table import Table
 
     tools_desc = {
@@ -421,6 +420,8 @@ def chat(
                 console.print(__doc__)
             elif cmd == "/new":
                 session = Session(config)
+                # 信任白名单声明为"会话内有效"，/new 后回到手动确认
+                _ConfirmState.trusted_tools.clear()
                 console.print(f"[dim]新会话 {session.id}[/dim]")
                 logger.info("新会话: %s", session.id)
             elif cmd == "/model":
