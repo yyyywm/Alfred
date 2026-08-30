@@ -16,8 +16,12 @@ class MemoryClient(Protocol):
         messages: list[dict[str, str]],
         *,
         user_id: str = "owner",
+        metadata: dict | None = None,
     ) -> None:
-        """添加记忆条目。messages 为 [{"role": ..., "content": ...}, ...]。"""
+        """添加记忆条目。messages 为 [{"role": ..., "content": ...}, ...]。
+
+        metadata 附在记忆上供 provider 区分上下文来源（如会话 id）。
+        """
 
     def search(
         self,
@@ -31,8 +35,8 @@ class MemoryClient(Protocol):
     def list_all(self, limit: int = 100, *, user_id: str = "owner") -> list[dict]:
         """列出所有记忆。"""
 
-    def delete(self, memory_id: str) -> bool:
-        """按 id 删除记忆。"""
+    def delete(self, memory_id: str, *, user_id: str | None = None) -> bool:
+        """按 id 删除记忆。指定 user_id 时先校验归属，避免跨租户误删。"""
 
 
 @runtime_checkable

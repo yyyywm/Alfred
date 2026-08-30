@@ -160,3 +160,49 @@ def test_build_mem0_uses_huggingface_embedder_for_local(monkeypatch):
     embedder_cfg = captured["cfg"]["embedder"]
     assert embedder_cfg["provider"] == "huggingface"
     assert embedder_cfg["config"]["model"] == "BAAI/bge-large-zh-v1.5"
+
+
+def test_delete_checks_tenant_ownership(tmp_path):
+    """delete 先校验 user_id 归属，跨租户的 id 不能删。
+
+    回归：mem0 的 get/delete 都不按租户校验 id，旧实现直接
+    self._mem.delete(memory_id) 返回 True——任意 id 都能删掉，
+    多 agent 共享时误删其他租户的记忆。这里用假 mem0 验证归属门禁，
+    不触碰真实 mem0/Qdrant。
+    """
+    from alfred.memory.local import LocalMemoryClient
+
+    class FakeMem0:
+        """只实现 get/delete，签名对齐 mem0ai（get 只收 memory_id）。"""
+        def __init__(self, store):
+            self.store = store
+        def get(self, memory_id):
+            return self.store.get(memory_id)
+        def delete(self, memory_id):
+            self.store.pop(memory_id, None)
+            return True
+
+    store = {
+        "m1": {"id": "m1", "memory": "owner 的事实", "user_id": "owner"},
+        "m2": {"id": "m2", "memory": "别的租户的记忆", "user_id": "tenant-b"},
+    }
+    cfg = Config(memory={"dir": str(tmp_path / "mem"), "default_user_id": "owner"})
+    # 绕过 __init__：不需要真的构建 mem0 + Qdrant
+    client = object.__new__(LocalMemoryClient)
+    client._config = cfg
+    client._user_id = "owner"
+    client._mem = FakeMem0(store)
+
+    assert client.delete("m1") is True
+    assert "m1" not in store
+    # 跨租户：门禁拦下，不删
+    assert client.delete("m2") is False
+    assert "m2" in store
+    # 显式 user_id 优先于构造时的默认租户
+    assert client.delete("m2", user_id="tenant-b") is True
+    assert "m2" not in store
+    # 不存在的 id
+    assert client.delete("nope") is False
+    # 没有 user_id 字段的旧数据无法判断归属，保持可删（向后兼容）
+    client._mem.store = {"old": {"id": "old", "memory": "无租户字段的旧记录"}}
+    assert client.delete("old") is True

@@ -133,6 +133,19 @@ class LocalMemoryClient(MemoryClient):
             items = result
         return items[:limit]
 
-    def delete(self, memory_id: str) -> bool:
+    def delete(self, memory_id: str, *, user_id: str | None = None) -> bool:
+        """按 id 删除记忆，返回是否真的删掉了。
+
+        mem0 的 get/delete 都不按租户校验 id，越权删除是调用方责任，
+        所以这里先读回来比对 user_id 归属。注意 mem0ai 的 get() 只收
+        memory_id（不支持 user_id 过滤参数），所以只能在结果上做校验。
+        """
+        uid = user_id or self._user_id
+        existing = self._mem.get(memory_id)
+        if not existing:
+            return False
+        owned_by = existing.get("user_id")
+        if owned_by and owned_by != uid:
+            return False
         self._mem.delete(memory_id)
         return True

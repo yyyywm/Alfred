@@ -195,6 +195,6 @@ def delete(config: Config, memory_id: str, user_id: str | None = None) -> bool:
     if client is None:
         return False
     try:
-        return client.delete(memory_id)
+        return client.delete(memory_id, user_id=user_id or config.memory.default_user_id)
     except Exception:
         return False
