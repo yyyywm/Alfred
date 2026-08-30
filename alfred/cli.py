@@ -946,7 +946,7 @@ def memory(
     elif action == "delete" and target:
         items = longterm.list_all(config)
         hit = next((m for m in items if str(m.get("id", "")).startswith(target)), None)
-        if hit and Confirm.ask(f"删除记忆「{hit.get('memory', '')[:60]}」？", default=False):
+        if hit and typer.confirm(f"删除记忆「{hit.get('memory', '')[:60]}」？", default=False):
             longterm.delete(config, hit["id"])
             console.print("[green]已删除。[/green]")
     elif action == "history":
