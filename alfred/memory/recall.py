@@ -16,7 +16,13 @@ def _parse_ts(value) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, str):
-        for fmt in ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S"):
+        # mem0 的 created_at 是无时区的 ISO 格式（2026-08-30T15:16:00），
+        # 之前只试带 %z 的格式，导致近因度恒为 0.5——recency 权重实际失效。
+        for fmt in (
+            "%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z",
+            "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d %H:%M:%S",
+        ):
             try:
                 return datetime.strptime(value, fmt).timestamp()
             except ValueError:
@@ -30,7 +36,8 @@ def rank_memories(config: Config, items: list[dict]) -> list[dict]:
     now = time.time()
 
     def fused(m: dict) -> float:
-        rel = float(m.get("score") or 0.5)
+        # 用 m.get(...) is None 判断缺省：0.0 是合法的低分，不能被 or 改成 0.5
+        rel = float(m["score"]) if m.get("score") is not None else 0.5
         ts = _parse_ts(m.get("created_at") or m.get("updated_at"))
         if ts is None:
             recency = 0.5

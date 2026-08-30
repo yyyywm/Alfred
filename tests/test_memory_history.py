@@ -1,6 +1,7 @@
 """召回排序与预算测试、会话历史测试。"""
 
 import time
+from datetime import datetime
 
 from alfred.config import Config
 from alfred.history import Session, delete_session, list_sessions
@@ -14,6 +15,11 @@ def _cfg(tmp_path, budget=3):
     )
 
 
+def _iso(ts: float) -> str:
+    """mem0 风格的无时区 ISO 时间戳。"""
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def test_recall_budget(tmp_path):
     cfg = _cfg(tmp_path, budget=3)
     items = [{"memory": f"记忆{i}", "score": 0.5 + i * 0.05} for i in range(10)]
@@ -21,17 +27,56 @@ def test_recall_budget(tmp_path):
     assert len(ranked) == 3  # 硬预算截断
 
 
+def test_parse_ts_formats():
+    """mem0 的 created_at 是无时区 ISO，必须能被解析——否则 recency 恒为 0.5。"""
+    from alfred.memory.recall import _parse_ts
+
+    assert _parse_ts("2026-08-30T15:16:00") is not None        # mem0 真实格式（无时区）
+    assert _parse_ts("2026-08-30T15:16:00.123456") is not None
+    assert _parse_ts("2026-08-30 15:16:00") is not None
+    assert _parse_ts("2026-08-30T15:16:00+08:00") is not None
+    assert _parse_ts(1700000000) == 1700000000.0
+    assert _parse_ts(None) is None
+    assert _parse_ts("not-a-date") is None
+
+
 def test_recency_boost(tmp_path):
+    """近因度能真正翻转排序：新鲜的中等相关度应胜过陈旧的极高相关度。
+
+    回归：_parse_ts 只试带 %z 的格式，mem0 无时区时间戳全部解析失败，
+    recency 恒为 0.5，0.3 的近因权重形同虚设。
+    """
     cfg = _cfg(tmp_path)
     now = time.time()
     old_relevant = {"memory": "旧但相关", "score": 0.9,
-                    "created_at": "2020-01-01T00:00:00+00:00"}
-    new_less_relevant = {"memory": "新但略逊", "score": 0.7}
-    # 新记忆没有 created_at 时 recency 取中值 0.5，旧的衰减更多
+                    "created_at": _iso(now - 60 * 86400)}  # 2 个半衰期 → recency 0.25
+    new_less_relevant = {"memory": "新但略逊", "score": 0.7,
+                         "created_at": _iso(now)}          # recency 1.0
     ranked = rank_memories(cfg, [old_relevant, new_less_relevant])
-    assert len(ranked) == 2
-    # 两者都应保留，但 fused 分数应有差异
-    assert ranked[0] != ranked[1] or True
+    assert ranked[0]["memory"] == "新但略逊"
+    # 同等相关度时，近因度是唯一区分因素（把陈旧项放前面，确认不是排序稳定性假象）
+    same_rel = [
+        {"memory": "陈旧同分", "score": 0.7, "created_at": _iso(now - 60 * 86400)},
+        {"memory": "新鲜同分", "score": 0.7, "created_at": _iso(now)},
+    ]
+    assert rank_memories(cfg, same_rel)[0]["memory"] == "新鲜同分"
+
+
+def test_zero_score_not_remapped(tmp_path):
+    """score 为 0.0 是合法低分，不能被 `or` 重映射成默认 0.5。"""
+    cfg = _cfg(tmp_path)
+    now = time.time()
+    ranked = rank_memories(
+        cfg,
+        [
+            {"memory": "零分但新鲜", "score": 0.0, "created_at": _iso(now)},
+            {"memory": "零分且陈旧", "score": 0.0, "created_at": _iso(now - 60 * 86400)},
+            {"memory": "中等相关无时间", "score": 0.5},
+        ],
+    )
+    # 0.0 分 + 新鲜 recency=1.0 → 0.30；中等相关 0.5 → 0.50；陈旧 0.0 → 0.075
+    assert ranked[0]["memory"] == "中等相关无时间"
+    assert ranked[-1]["memory"] == "零分且陈旧"
 
 
 def test_render_empty():
