@@ -95,8 +95,12 @@ class MemoryAuditReport:
         }
 
 
-def _scan_sessions(config) -> tuple[Counter, int, int, int]:
-    """扫描所有历史会话，返回 (工具调用计数器, 总调用, 成功, 失败)。
+def _scan_sessions(config, cutoff: float = 0.0) -> tuple[Counter, int, int, int]:
+    """扫描历史会话，返回 (工具调用计数器, 总调用, 成功, 失败)。
+
+    cutoff 为时间戳下限：只统计最后写入时间 >= cutoff 的会话，
+    与 report.total_turns 使用同一时间窗，避免同一份报告里
+    工具成功率是终身统计、轮数却是近期统计的窗口错配。
 
     返回: (name_counter, total, success, error)
     """
@@ -105,7 +109,9 @@ def _scan_sessions(config) -> tuple[Counter, int, int, int]:
     success = 0
     error = 0
 
-    for sid, _mtime, _count in list_sessions(config):
+    for sid, mtime, _count in list_sessions(config):
+        if cutoff and mtime < cutoff:
+            continue
         try:
             s = Session(config, session_id=sid)
         except Exception:
@@ -167,8 +173,8 @@ def audit(config, days: int = 90) -> MemoryAuditReport:
     except Exception:
         pass
 
-    # ④ 工具调用统计
-    name_counter, total, success, error = _scan_sessions(config)
+    # ④ 工具调用统计（与 ① 的 total_turns 使用同一 days 时间窗）
+    name_counter, total, success, error = _scan_sessions(config, cutoff)
     report.tool_counts_by_name = name_counter
     report.tool_calls_total = total
     report.tool_success = success
