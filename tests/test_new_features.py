@@ -50,6 +50,24 @@ def test_global_limit_fallback(tmp_path):
     assert blocks.limit_for("persona") == 1500
 
 
+def test_limit_for_is_generic(tmp_path):
+    """limit_for 按 `<block>_block_char_limit` 泛化解析，不遗漏任何块。
+
+    回归：之前写死 human/persona 两个分支，lessons_block_char_limit
+    被静默忽略，limit_for("lessons") 错误地回退到全局 2000。
+    """
+    cfg = Config(memory={
+        "dir": str(tmp_path / "mem"),
+        "block_char_limit": 1000,
+        "human_block_char_limit": 8000,
+        "lessons_block_char_limit": 4000,
+    })
+    assert cfg.memory.limit_for("human") == 8000
+    assert cfg.memory.limit_for("lessons") == 4000
+    assert cfg.memory.limit_for("persona") == 1000  # 未设置 → 全局默认
+    assert cfg.memory.limit_for("no-such-block") == 1000
+
+
 def test_user_facts_header_reused_and_greedy_pack(tmp_path):
     """自动沉淀章节头只出现一次；空间不足时贪心装入能装下的，不整批放弃。
 

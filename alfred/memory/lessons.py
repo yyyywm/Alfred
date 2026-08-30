@@ -13,7 +13,6 @@ Reasoning"）：agent 不通过更新权重学习，而是通过**语言化的�
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 
 import git
 import logging
@@ -29,9 +28,8 @@ LESSONS_TEMPLATE = """# Lessons Block —— 管家的成长教训
 _（还没有教训记录。随着对话中遇到的问题、纠正和复盘，教训会逐渐积累。）_
 """
 
-# lessons 块字符上限（教训需要简洁但比 human/persona 宽松）
-LESSONS_MAX_CHARS = 4000
-# 超过上限后触发压缩，保留最近 N 条
+# 超过上限后触发压缩，保留最近 N 条。
+# 上限本身从 config.memory.lessons_block_char_limit 读取（默认 4000），不再硬编码。
 LESSONS_KEEP_ON_COMPRESS = 20
 
 
@@ -44,7 +42,7 @@ class LessonsBlock:
         self.dir = config.path(config.memory.dir)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.path = self.dir / f"{self.NAME}.md"
-        self.max_chars = LESSONS_MAX_CHARS
+        self.max_chars = config.memory.lessons_block_char_limit
         self._repo = self._ensure_repo()
         if not self.path.exists():
             self.path.write_text(LESSONS_TEMPLATE, encoding="utf-8")
@@ -118,7 +116,6 @@ class LessonsBlock:
             entries.append(current_entry)
 
         # 保留 header（模板前几行）+ 最近的 N 条
-        header = "、".join(lines[:3])
         header = "\n".join(lines[:3])
         if not header.strip():
             header = LESSONS_TEMPLATE.strip()

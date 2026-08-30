@@ -58,6 +58,10 @@ models:
 memory:
   dir: data/memory          # human.md / persona.md / lessons.md（独立 git 仓库版本化）
   block_char_limit: 2000    # 每个 core block 的字符上限（最小高信号原则）
+  # 两块独立上限：human 是 6 分类结构化画像，需要比 persona 更多空间；
+  # 不设置时会回退到上面的 block_char_limit，画像会在 2000 字符处提前被截断。
+  human_block_char_limit: 8000
+  lessons_block_char_limit: 4000  # lessons 追加型，比画像块宽松
   recall_budget: 10         # 每轮记忆召回硬预算（context rot 实证：宁少勿滥）
   recency_half_life_days: 30
   provider: local           # 记忆客户端 provider（当前仅 local，未来可加云端）

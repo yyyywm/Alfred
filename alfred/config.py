@@ -76,7 +76,7 @@ class MemoryConfig(BaseModel):
     # 各块独立上限（human 块需要更多空间承载结构化画像；默认 8000）
     human_block_char_limit: int | None = None
     persona_block_char_limit: int | None = None
-    # lessons 保持独立（见 lessons.py）
+    # lessons 追加型，独立上限；LessonsBlock 从这里读，不硬编码
     lessons_block_char_limit: int = 4000
     recall_budget: int = 10
     recency_half_life_days: int = 30
@@ -86,11 +86,14 @@ class MemoryConfig(BaseModel):
     default_user_id: str = "owner"
 
     def limit_for(self, block: str) -> int:
-        """返回指定块的字符上限，优先取块级配置，回退到全局默认。"""
-        if block == "human" and self.human_block_char_limit is not None:
-            return self.human_block_char_limit
-        if block == "persona" and self.persona_block_char_limit is not None:
-            return self.persona_block_char_limit
+        """返回指定块的字符上限，优先取 `<block>_block_char_limit`，回退到全局默认。
+
+        按字段名泛化而非写死 if 分支：新增块时只需加配置字段，
+        之前漏掉 lessons 的分支会让 lessons_block_char_limit 静默失效。
+        """
+        per_block = getattr(self, f"{block}_block_char_limit", None)
+        if per_block is not None:
+            return per_block
         return self.block_char_limit
 
 
