@@ -26,9 +26,21 @@ def get_db(config: Config):
     return _db
 
 
+def _table_names(db) -> set[str]:
+    """返回库中所有表名（set）。
+
+    lancedb >= 0.33 的 list_tables() 返回 ListTablesResponse 对象而非字符串列表，
+    直接 `in` 判断会永远为 False。这里统一归一化为纯表名集合。
+    """
+    tables = db.list_tables()
+    if hasattr(tables, "tables"):
+        tables = tables.tables
+    return set(tables)
+
+
 def _open_or_create(db, table: str, schema_rows: list[dict]):
     """表不存在时用首行数据创建；空数据则创建带一行占位的表再删除。"""
-    if table in db.list_tables():
+    if table in _table_names(db):
         return db.open_table(table)
     if not schema_rows:
         raise ValueError("首次创建表需要至少一行数据")
@@ -41,7 +53,7 @@ def upsert_chunks(config: Config, table: str, rows: list[dict], key: str = "chun
         return 0
     db = get_db(config)
     keys = [r[key] for r in rows]
-    if table in db.list_tables():
+    if table in _table_names(db):
         t = db.open_table(table)
         quoted = ",".join(f"'{k}'" for k in keys)
         t.delete(f"{key} IN ({quoted})")
@@ -54,7 +66,7 @@ def upsert_chunks(config: Config, table: str, rows: list[dict], key: str = "chun
 def search(config: Config, table: str, vector: list[float], limit: int = 5,
            where: str | None = None) -> list[dict]:
     db = get_db(config)
-    if table not in db.list_tables():
+    if table not in _table_names(db):
         return []
     t = db.open_table(table)
     q = t.search(vector).limit(limit)
@@ -65,5 +77,5 @@ def search(config: Config, table: str, vector: list[float], limit: int = 5,
 
 def delete_by_source(config: Config, table: str, source: str) -> None:
     db = get_db(config)
-    if table in db.list_tables():
+    if table in _table_names(db):
         db.open_table(table).delete(f"source = '{source}'")

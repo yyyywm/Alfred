@@ -199,10 +199,11 @@ def audit(config, days: int = 90) -> MemoryAuditReport:
     # 目前 notes 没有访问时间戳，用 transcript 匹配 source 做粗粒度估算
     try:
         from ..knowledge import store as knowledge_store
+        from ..knowledge.store import _table_names
         from ..knowledge import embed as embed_mod
 
         db = knowledge_store.get_db(config)
-        if "notes" in db.list_tables():
+        if "notes" in _table_names(db):
             notes = db.open_table("notes").to_list()
             all_sources = {r.get("source") for r in notes if r.get("source")}
             referenced: set[str] = set()

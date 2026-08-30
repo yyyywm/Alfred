@@ -843,8 +843,9 @@ def _show_whoami(config, blocks: MemoryBlocks) -> None:
     episode_count = 0
     try:
         from .knowledge import store as knowledge_store
+        from .knowledge.store import _table_names
         db = knowledge_store.get_db(config)
-        if "episodes" in db.list_tables():
+        if "episodes" in _table_names(db):
             episode_count = len(db.open_table("episodes").to_list())
     except Exception:
         episode_count = 0
@@ -853,7 +854,7 @@ def _show_whoami(config, blocks: MemoryBlocks) -> None:
     notes_count = 0
     try:
         db = knowledge_store.get_db(config)
-        if "notes" in db.list_tables():
+        if "notes" in _table_names(db):
             notes_count = len(db.open_table("notes").to_list())
     except Exception:
         notes_count = 0
@@ -862,7 +863,7 @@ def _show_whoami(config, blocks: MemoryBlocks) -> None:
     framework_count = 0
     try:
         db = knowledge_store.get_db(config)
-        if "frameworks" in db.list_tables():
+        if "frameworks" in _table_names(db):
             framework_count = len(db.open_table("frameworks").to_list())
     except Exception:
         framework_count = 0
