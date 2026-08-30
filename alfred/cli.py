@@ -529,8 +529,6 @@ def chat(
         logger.info("第 %d 轮输入，长度: %d", turn_count, len(user_input))
 
         reply_parts: list[str] = []
-        tool_lines: list[str] = []
-        region_saved = False
         status = console.status("[bold green]助手正在思考...[/bold green]", spinner="dots")
         status.start()
         status_active = True
@@ -541,16 +539,7 @@ def chat(
                 status.stop()
                 status_active = False
 
-        def save_cursor() -> None:
-            console.file.write("\x1b[s")
-            console.file.flush()
-
-        def restore_and_clear() -> None:
-            console.file.write("\x1b[u\x1b[J")
-            console.file.flush()
-
         first_content_received = False
-        is_tty = console.is_terminal
 
         try:
             for event in chat_turn_stream(agent, deps, session, user_input, bus=EventBus()):
@@ -559,46 +548,29 @@ def chat(
                     if not first_content_received:
                         stop_status()
                         first_content_received = True
-                    if is_tty and not region_saved:
-                        save_cursor()
-                        region_saved = True
                         console.print("[bold green]助手：[/bold green] ", end="")
-                    if is_tty:
-                        console.out(event.delta, end="")
+                    console.out(event.delta, end="")
                     reply_parts.append(event.delta)
                 elif isinstance(event, ToolCallStart):
                     if not first_content_received:
                         stop_status()
                         first_content_received = True
-                    line = f"[dim]🔧 {event.tool_name} ...[/dim]"
-                    console.print(line)
-                    tool_lines.append(line)
+                    console.print(f"[dim]🔧 {event.tool_name} ...[/dim]")
                     logger.info("工具调用: %s, args: %s", event.tool_name, event.args)
                 elif isinstance(event, ToolCallEnd):
                     mark = "[green]✓[/green]" if not event.is_error else "[red]✗[/red]"
-                    line = f"[dim]🔧 {event.tool_name} {mark}[/dim]"
-                    console.print(line)
-                    tool_lines.append(line)
+                    console.print(f"[dim]🔧 {event.tool_name} {mark}[/dim]")
                     logger.info("工具结束: %s, 错误: %s", event.tool_name, event.is_error)
                 elif isinstance(event, ToolDenied):
-                    line = f"[dim]🔧 {event.tool_name} [red]已拒绝[/red][/dim]"
-                    console.print(line)
-                    tool_lines.append(line)
+                    console.print(f"[dim]🔧 {event.tool_name} [red]已拒绝[/red][/dim]")
                     logger.info("工具拒绝: %s", event.tool_name)
                 elif isinstance(event, TurnEnd):
                     stop_status()
-                    reply = "".join(reply_parts).strip()
-                    if region_saved:
-                        # 流式原始文本回显 → 回滚该区域 → 重新按 Markdown 渲染
-                        restore_and_clear()
-                        for line in tool_lines:
-                            console.print(line)
-                        if reply:
-                            console.print("[bold green]助手：[/bold green]")
-                            console.print(Markdown(reply))
-                    elif reply:
-                        console.print("[bold green]助手：[/bold green]")
-                        console.print(Markdown(reply))
+                    if reply_parts:
+                        # 流式文本已在 AssistantChunk 阶段实时输出，这里补一个换行收尾即可。
+                        # 不再做「清屏 + Markdown 重渲染」——ANSI 光标转义（\x1b[s / \x1b[u\x1b[J）
+                        # 在部分终端下清不掉流式区域，会导致同一回复输出两次（曾出现的 bug）。
+                        console.print()
                 elif isinstance(event, TurnError):
                     logger.error("TurnError: %s", event.error)
         except (Exception, KeyboardInterrupt) as e:
