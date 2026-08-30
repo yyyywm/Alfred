@@ -50,6 +50,42 @@ def test_global_limit_fallback(tmp_path):
     assert blocks.limit_for("persona") == 1500
 
 
+def test_user_facts_header_reused_and_greedy_pack(tmp_path):
+    """自动沉淀章节头只出现一次；空间不足时贪心装入能装下的，不整批放弃。
+
+    回归：之前每次复盘都追加一个重复的 ## 标题，且接近上限时整批放弃。
+    """
+    from alfred.memory.consolidate import _apply_user_facts_to_human
+
+    cfg = Config(memory={
+        "dir": str(tmp_path / "mem"),
+        "human_block_char_limit": 400,  # 模板 251 字符，留约 100 字符余量
+    })
+    blocks = MemoryBlocks(cfg)
+
+    _apply_user_facts_to_human(cfg, ["用户喜欢喝茶", "用户养了一只猫"])
+    human = blocks.read("human")
+    assert human.count("自动沉淀的用户事实") == 1
+    for fact in ("用户喜欢喝茶", "用户养了一只猫"):
+        assert fact in human
+
+    # 第二次复盘写入新事实时复用同一章节头（回归：旧实现每次追加一个新标题）
+    _apply_user_facts_to_human(cfg, ["用户住在杭州"])
+    human = blocks.read("human")
+    assert human.count("自动沉淀的用户事实") == 1
+    assert "用户住在杭州" in human
+
+    # 幂等：已存在的事实不重复写入
+    assert _apply_user_facts_to_human(cfg, ["用户喜欢喝茶"]) == []
+    assert blocks.read("human").count("用户喜欢喝茶") == 1
+
+    # 空间耗尽时返回跳过提示，而不是静默丢弃
+    too_big = ["这是一条非常长的用户事实。" * 30]
+    result = _apply_user_facts_to_human(cfg, too_big)
+    assert result and result[0].startswith("[跳过:")
+    assert blocks.read("human") == human  # 未写入任何东西
+
+
 # ── P0-2: auto-consolidate 自动写入 ──────────────────────────────────
 
 def test_apply_unattended_writes_memory_and_lessons_and_episodes(tmp_path, monkeypatch):

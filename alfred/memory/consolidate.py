@@ -69,6 +69,8 @@ _AGENT_FACT_PATTERNS = (
     r"ToolDeniedError", r"ToolExecutionPipeline",
     r"memory_search", r"memory_update_block",
 )
+# 自动沉淀到 human 块的章节头（复用已有标题，避免重复追加）
+_AUTO_FACTS_HEADER = "## 自动沉淀的用户事实（consolidate 自动写入）"
 
 
 def _extract_user_facts_from_memories(entries: list[str]) -> list[str]:
@@ -82,24 +84,40 @@ def _extract_user_facts_from_memories(entries: list[str]) -> list[str]:
 
 
 def _apply_user_facts_to_human(config: Config, facts: list[str]) -> list[str]:
-    """把 user facts 增量追加到 human block。幂等：已存在不重复写。"""
+    """把 user facts 增量追加到 human block。
+
+    幂等：已存在的事实不重复写，章节头只出现一次。
+    空间不足时按顺序尽量多写，写不下的返回 [跳过: ...] 而不是整批放弃。
+    """
     blocks = MemoryBlocks(config)
     current = blocks.read("human")
     new_facts = [f for f in facts if f not in current]
     if not new_facts:
         return []
-    addition = "\n".join(f"- {f}" for f in new_facts)
-    updated = (
-        current.rstrip()
-        + "\n\n## 自动沉淀的用户事实（consolidate 自动写入）\n"
-        + addition
-        + "\n"
-    )
+
     limit = blocks.limit_for("human")
-    if len(updated) > limit:
+    # 章节头已存在则复用，避免每次复盘都追加一个重复的 ## 标题
+    header = "" if _AUTO_FACTS_HEADER in current else _AUTO_FACTS_HEADER
+
+    body = ""
+    written: list[str] = []
+    head = f"{header}\n" if header else ""
+    for fact in new_facts:
+        line = f"- {fact}\n"
+        # 直接用最终字符串的长度做判断，避免估算与实际写入不一致
+        if len(current.rstrip() + "\n\n" + head + body + line) > limit:
+            break
+        body += line
+        written.append(fact)
+
+    if not written:
         return [f"[跳过: 超出 human 块上限 {limit} 字符]" for _ in new_facts]
-    result = blocks.update("human", updated, reason="auto-consolidate: user facts from memory")
-    return [f"用户事实→human块：{r[:50]}" for r in new_facts]
+
+    updated = current.rstrip() + "\n\n" + head + body
+    blocks.update("human", updated, reason="auto-consolidate: user facts from memory")
+    applied = [f"用户事实→human块：{r[:50]}" for r in written]
+    skipped = [f"[跳过: 超出 human 块上限 {limit} 字符]" for f in new_facts[len(written):]]
+    return applied + skipped
 
 
 def _recent_transcripts(config: Config, days: int = 3, max_sessions: int = 5) -> str:
@@ -205,6 +223,28 @@ def apply_drafts(config: Config, drafts: dict,
                 lessons_block = LessonsBlock(config)
                 result = lessons_block.add(category, lesson, context)
                 applied.append(f"RefleXion 教训：{result}")
+            except Exception:
+                pass
+
+    # 情景记忆：与 apply_unattended 一致，否则交互模式下 LLM 产出的 episodes 会被静默丢弃
+    for item in drafts.get("episodes") or []:
+        situation = item.get("situation", "")
+        result = item.get("result", "")
+        if not (situation and result):
+            continue
+        if confirm(
+            f"保存情景记忆（成功案例四元组）：\n  场景：{situation[:80]}\n  结果：{result[:80]}\n确认？"
+        ):
+            try:
+                from .episodic import Episode, save_episode
+                ep = Episode(
+                    situation=situation,
+                    thoughts=item.get("thoughts", ""),
+                    action=item.get("action", ""),
+                    result=result,
+                )
+                save_episode(config, ep)
+                applied.append(f"情景记忆：{situation[:50]}")
             except Exception:
                 pass
 
