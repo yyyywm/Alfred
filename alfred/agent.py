@@ -322,7 +322,8 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
         """在长期记忆中搜索关于用户的事实（偏好、经历、计划等）。
         当你需要回忆用户说过的话、了解用户某方面情况时使用。"""
         memories = recall.recall(ctx.deps.config, query)
-        ctx.deps.last_recalled = [m.get("memory", str(m)) for m in memories]
+        # 累加而非重新绑定：一轮内可能多次召回，/why 要能显示全部依据
+        ctx.deps.last_recalled.extend(m.get("memory", str(m)) for m in memories)
         return recall.render_for_prompt(memories)
 
     def memory_update_block(ctx: RunContext[AlfredDeps], name: str, content: str,
@@ -697,7 +698,7 @@ def chat_turn_stream(
         config=deps.config,
         blocks=deps.blocks,
         confirm=deps.confirm,
-        last_recalled=deps.last_recalled,
+        last_recalled=[],  # 每轮重置，避免上一轮的召回记录混进 /why
         session_id=session.id,
         bus=bus,
         tool_records=[],
