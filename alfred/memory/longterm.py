@@ -90,7 +90,8 @@ def reset_clients() -> None:
     _user_clients = {}
 
 
-USER_ID = "owner"
+# 租户 id 一律从 config.memory.default_user_id 读取，这里不再放硬编码副本
+# （两处常量会漂移，已发生过：consolidate 写死 USER_ID 而非读 config）。
 
 _MESSAGE_MIN_CHARS = 20
 _TRIVIAL_USER_PATTERNS = (

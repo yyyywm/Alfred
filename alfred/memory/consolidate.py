@@ -176,7 +176,8 @@ def apply_drafts(config: Config, drafts: dict,
             mem = longterm.get_memory(config)
             if mem is not None:
                 try:
-                    mem.add([{"role": "user", "content": entry}], user_id=longterm.USER_ID)
+                    mem.add([{"role": "user", "content": entry}],
+                            user_id=config.memory.default_user_id)
                     applied.append(f"记忆条目：{entry[:50]}")
                 except Exception:
                     pass
@@ -290,7 +291,8 @@ def apply_unattended(config: Config, drafts: dict) -> list[str]:
         try:
             mem = longterm.get_memory(config)
             if mem is not None:
-                mem.add([{"role": "user", "content": entry}], user_id=longterm.USER_ID)
+                mem.add([{"role": "user", "content": entry}],
+                        user_id=config.memory.default_user_id)
                 applied.append(f"记忆条目：{entry[:50]}")
         except Exception:
             pass
