@@ -229,6 +229,7 @@ memory:
   dir: data/memory
   block_char_limit: 2000          # 全局默认上限（persona / 未单独配置的块）
   human_block_char_limit: 8000    # human 块独立上限（结构化画像，需要更多空间）
+  lessons_block_char_limit: 4000  # lessons 追加型，比画像块宽松
   recall_budget: 10
   recency_half_life_days: 30
   provider: local
@@ -238,7 +239,7 @@ paths:
   history_dir: data/history
   vectordb_dir: data/vectordb
   skills_dirs: [~/.agents/skills]
-    rules_dirs: [rules]
+  rules_dirs: [rules]
 ```
 
 ### 关键配置原则
@@ -251,7 +252,7 @@ paths:
 
 ### Skills（技能）
 
-技能统一存放在用户级目录 `~/.agents/skills/`，所有 Hermes 项目共享同一份 skill 库。
+技能统一存放在用户级目录 `~/.agents/skills/`，本地所有 Alfred 实例共享同一份 skill 库。
 
 在 `~/.agents/skills/<name>/SKILL.md` 创建技能文件，含 YAML frontmatter（`name`、`description`）+ Markdown 正文，符合 Anthropic Agent Skills 标准格式。
 

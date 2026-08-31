@@ -167,7 +167,7 @@ Alfred/
 - `models.chat`：闲聊模型，对话中可用 `/model provider:model` 自由切换
 - `models.memory_write`：记忆写入/复盘模型，固定强模型，质量敏感
 - `models.embed`：embedding 模型配置。`provider: local`（本地 sentence-transformers）或 `provider: openai_compat`（云端 embedding API）。支持 `hf_endpoint` 镜像地址、`local_dir` 本地目录、`base_url`/`env_key`/`api_key` API 鉴权。模型一旦选定不要换，否则 notes/frameworks/episodes 向量库需要全量重建。
-- `memory.*`：记忆块字符上限、召回硬预算、近因半衰期、`provider`（记忆客户端选择）、`default_user_id`（多 agent 共享时的租户隔离）
+- `memory.*`：记忆块字符上限（`block_char_limit` 全局默认 + `<block>_block_char_limit` 逐块覆盖）、召回硬预算、近因半衰期、`provider`（记忆客户端选择）、`default_user_id`（多 agent 共享时的租户隔离，代码中不再保留硬编码副本）
 - `paths.*`：history/vectordb/skills/rules 目录
 
 模型引用格式统一为 `provider:model`，由 `config.resolve()` 解析。
@@ -176,7 +176,7 @@ Alfred/
 
 ### CLI（`alfred/cli.py`）
 - 所有用户命令入口：`chat`、`ingest`、`feed`、`frameworks`、`consolidate`、`memory`、`skills`、`models`
-- `chat` 内支持斜杠命令：`/exit`、`/new`、`/model`、`/remember`、`/memory`、`/why`、`/sessions`、`/load`、`/delete`、`/lessons`、`/status`、`/help`
+- `chat` 内支持斜杠命令：`/exit`、`/new`、`/model`、`/remember`、`/memory`、`/why`、`/sessions`、`/load`、`/delete`、`/lessons`、`/status`、`/whoami`、`/trust`、`/consolidate`、`/consolidate-review`、`/audit`、`/help`
 - `chat` 启动选项：`--session/-s` 恢复会话、`--debug` 启用调试日志输出到控制台
 - `chat` 交互使用 `prompt_toolkit.PromptSession`：支持行编辑（光标移动、删除、历史）、长输入；发送后显示 `助手正在思考...` spinner，收到首个事件后切换为 `助手：` 前缀；工具调用单独成行显示
 - 所有 Rich Console 输出集中在主线程渲染，避免与后台 agent 线程竞争；用户确认回调 `_confirm` 用原生 `print/input` 实现以降低线程安全风险
@@ -198,8 +198,8 @@ Alfred/
 4. 静态缓存层：`skill_index` + `lessons_text`（build_agent 时一次性预加载，避免每轮 I/O）
 5. 动态层：常驻规则 + 可召回规则索引 + 当前日期（`inject_rules`、`inject_date`）
 
-**恒定工具集（`agent.py` 中注册，共 14 个）：**
-- `memory_search`：长期记忆召回（混合相关性 + 近因排序）
+**恒定工具集（`agent.py` 中注册，共 17 个）：**
+- `memory_search`：长期记忆召回（混合相关性 + 近因排序）。召回结果累加进 `deps.last_recalled`（`extend`，不是重新绑定），一轮内多次召回都要能被 `/why` 看到；`chat_turn_stream` 每轮用新的空列表建 `turn_deps`，轮间不串
 - `memory_update_block`：更新 human/persona 块（human 和 persona 修改均需用户确认）
 - `notes_search`：笔记 RAG
 - `episodes_search`：情景记忆检索（借鉴过去的成功经验）
@@ -224,12 +224,12 @@ Alfred/
 ### 记忆层（`alfred/memory/`）
 
 **协议层：**
-- `protocols.py`：定义 `MemoryClient`（`add`/`search`/`list_all`/`delete`）和 `EmbeddingClient`（`encode`/`dims`）协议，用于记忆后端可插拔。新增云端或其他 provider 只需实现协议。
-- `local.py`：`LocalMemoryClient`，基于 mem0 + 本地 Qdrant 实现 `MemoryClient` 协议。
+- `protocols.py`：定义 `MemoryClient`（`add`/`search`/`list_all`/`delete`）和 `EmbeddingClient`（`encode`/`dims`）协议，用于记忆后端可插拔。新增云端或其他 provider 只需实现协议。`add` 支持 `metadata`，`delete` 支持 `user_id`——协议签名必须与实现保持同步，否则类型检查通过但调用方误以为能力存在。
+- `local.py`：`LocalMemoryClient`，基于 mem0 + 本地 Qdrant 实现 `MemoryClient` 协议。`delete` 在删除前先按 `user_id` 校验归属（mem0 本身不按租户校验 id，越权删除是调用方责任）。
 
 **记忆块：**
 - `blocks.py`：`human`/`persona` 两个常驻记忆块，**每块上限独立可调**（`config.memory.<block>_block_char_limit`，未设置回退 `block_char_limit`）；human 块默认 8000 字符 + 结构化分类模板（基本资料 / 性格思维 / 项目工作 / 生活方式 / 关系偏好 / 关键决策），支持承载更完整的用户画像；每次修改自动 git commit；git commit 失败时记录 warning
-- `lessons.py`：`LessonsBlock`，RefleXion 教训记忆块（追加型，上限 4000 字符，超限自动压缩保留最近 20 条），与 human/persona 共用同一个 memory git 仓库
+- `lessons.py`：`LessonsBlock`，RefleXion 教训记忆块（追加型，上限读 `config.memory.lessons_block_char_limit`，默认 4000 字符，超限自动压缩保留最近 20 条），与 human/persona 共用同一个 memory git 仓库
 
 **长期记忆：**
 - `longterm.py`：记忆客户端工厂（用户级懒加载单例），按 `config.memory.provider` 分发到不同 MemoryClient 实现；`add_async`/`search`/`list_all`/`delete` 均支持 `user_id` 参数，用于多 agent 共享时的租户隔离
@@ -237,13 +237,14 @@ Alfred/
 - 初始化失败降级：client 创建失败时标记 `_init_failed`，后续操作空执行，不阻塞对话
 
 **召回与情景：**
-- `recall.py`：混合召回入口，按 `recall_budget` 硬预算截断，融合相关性（0.7）+ 近因（0.3）排序
+- `recall.py`：混合召回入口，按 `recall_budget` 硬预算截断，融合相关性（0.7）+ 近因（0.3）排序。`_parse_ts` 必须能解析 mem0 的无时区 ISO 时间戳（`2026-08-30T15:16:00`），否则近因度恒为 0.5、0.3 的权重形同虚设；`score` 为 0.0 是合法低分，判断缺省要用 `m.get(...) is None` 而非 `or`
 - `episodic.py`：情景记忆四元组（场景/思路/行动/结果），存 LanceDB `episodes` 表，`search_episodes` 支持语义检索
 
 **整理：**
-- `consolidate.py`：sleep-time 整理，产出五类草稿（memory_entries / human_block_update / rule_suggestions / stale_memories / lessons / episodes）；`apply_drafts` 逐项确认后入库；`apply_unattended` 无人值守模式**自动写入** lessons + memory_entries + episodes（用户事实沉淀和情景记忆四元组均为低风险 ADD-only 操作），human_block_update 按改动大小（≤500 字符自动写，超阈值降级 pending），rule_suggestions / stale_memories 始终待审。大幅 human 更新与待审项写入 `data/history/consolidate_pending.jsonl` 供 `/consolidate-review` 查看
+- `consolidate.py`：sleep-time 整理，产出六类草稿（memory_entries / human_block_update / rule_suggestions / stale_memories / lessons / episodes）；`apply_drafts` 逐项确认后入库（含 episodes，交互模式与无人值守模式的写入路径必须一致，否则 LLM 产出的情景记忆在交互模式下被静默丢弃）；`apply_unattended` 无人值守模式**自动写入** lessons + memory_entries + episodes（用户事实沉淀和情景记忆四元组均为低风险 ADD-only 操作），human_block_update 按改动大小（≤500 字符自动写，超阈值降级 pending），rule_suggestions / stale_memories 始终待审。大幅 human 更新与待审项写入 `data/history/consolidate_pending.jsonl` 供 `/consolidate-review` 查看
+- `_apply_user_facts_to_human`：把 memory_entries 中的纯用户事实晋升到 human 块（对齐 Rethinking Memory 的 Updating operation）。章节头只出现一次，空间不足时贪心装入能装下的条目并返回 `[跳过: ...]`，不整批放弃
 - `consolidate_state.py`：append-only JSONL 追踪对话轮数与最近复盘时间；`should_auto_consolidate()` 在 `chat` 退出时判断是否自动触发无人值守 consolidate（阈值：≥3 轮且距上次复盘 >24 小时），后台线程执行不阻塞退出
-- `audit.py`：记忆审计视图（`alfred audit` / `/audit`），诊断记忆库健康度、工具调用成功率、冷笔记、死规则、过期目标
+- `audit.py`：记忆审计视图（`alfred audit` / `/audit`），诊断记忆库健康度、工具调用成功率、冷笔记、死规则、过期目标。`days` 时间窗必须贯穿全报告——工具调用统计与 `total_turns` 用同一个 `cutoff`，否则同一份报告里成功率是终身统计、轮数却是近期统计
 - `monitor.py`：自监控度量（工具调用/记忆召回/skill 使用按天统计），供未来可视化/告警接入
 
 **自动复盘流程**：
