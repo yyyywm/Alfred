@@ -26,7 +26,6 @@ import typer
 from prompt_toolkit import PromptSession
 from prompt_toolkit.styles import Style
 from rich.console import Console
-from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 
@@ -530,10 +529,16 @@ def chat(
         turn_count += 1
         logger.info("第 %d 轮输入，长度: %d", turn_count, len(user_input))
 
-        reply_parts: list[str] = []          # 整轮全部文本，跨工具调用拼接，供记忆沉淀
+        reply_parts: list[str] = []          # 整轮全部文本，供记忆沉淀
+        pending: list[str] = []               # 当前未落定的正文段；工具调用/TurnEnd 时落定
+        header_printed = False
+        total_chars = 0
+        is_tty = console.is_terminal
+
         status = console.status("[bold green]助手正在思考...[/bold green]", spinner="dots")
-        status.start()
-        status_active = True
+        if is_tty:
+            status.start()
+        status_active = is_tty
 
         def stop_status() -> None:
             nonlocal status_active
@@ -541,61 +546,53 @@ def chat(
                 status.stop()
                 status_active = False
 
-        # 保留模式 markdown 渲染：把助手正文当作一个 live 区，每来一个 chunk 整体重渲染
-        # + 帧间 diff 原地补丁，live 区在 stop() 前不进 scrollback，因此不会出现「原文 +
-        # 重渲染」两遍（3e5f26d 之前用 \x1b[s/\x1b[u 回滚流式区域才会两遍）。这是 pi /
-        # kimi-code / Claude Code 的同款做法，Rich 的 Live 即其 Python 等价实现。
-        is_tty = console.is_terminal
-        live = None
-        segment_parts: list[str] = []        # 当前 live 段的文本；工具调用会切断一段
+        def resume_status() -> None:
+            nonlocal status_active
+            if not status_active and is_tty:
+                status.start()
+                status_active = True
 
-        def render_reply(text: str) -> Markdown:
-            return Markdown(text)
+        def flush_pending() -> None:
+            """把当前正文段以 markdown 一次性落定到 scrollback。
 
-        def open_live() -> None:
-            nonlocal live
-            live = Live(
-                render_reply(""),
-                console=console,
-                transient=False,           # 结束后正文留在屏幕
-                refresh_per_second=12,      # 节流，避免逐 token 全量重绘
-                vertical_overflow="visible",
-            )
-            live.start()
-
-        def close_live() -> None:
-            """把当前 live 段落定为最终 markdown 并关闭；幂等。"""
-            nonlocal live
-            if live is not None:
-                live.update(render_reply("".join(segment_parts).strip()))
-                live.stop()
-                live = None
-            segment_parts.clear()
-
-        first_content_received = False
+            纯向下追加（console.print），不做任何多行光标回卷 / 原地重绘——因此不会出现
+            Rich Live 那种「每帧整段重叠堆积」的爆屏（上一版卡的就是这个 bug：Live 靠
+            多行光标上移擦上一帧再重画，在此终端里没生效，于是每帧整段往下追加一份）。
+            代价：正文不再逐字流式，改为每段结束一次性渲染 markdown；进度由单行 spinner
+            （status，单行原地刷新可靠）的字数反馈承担。
+            """
+            nonlocal header_printed
+            text = "".join(pending).strip()
+            pending.clear()
+            if not text:
+                return
+            if not header_printed:
+                console.print("[bold green]助手：[/bold green]")
+                header_printed = True
+            console.print(Markdown(text))
 
         try:
             for event in chat_turn_stream(agent, deps, session, user_input, bus=EventBus()):
                 logger.debug("事件: %s", type(event).__name__)
                 if isinstance(event, AssistantChunk):
-                    if not first_content_received:
-                        stop_status()
-                        first_content_received = True
-                        console.print("[bold green]助手：[/bold green]")
                     reply_parts.append(event.delta)
+                    total_chars += len(event.delta)
                     if is_tty:
-                        segment_parts.append(event.delta)
-                        if live is None:
-                            open_live()
-                        live.update(render_reply("".join(segment_parts)))
+                        pending.append(event.delta)
+                        if not status_active:
+                            resume_status()
+                        status.update(
+                            f"[bold green]助手正在回复...[/bold green] "
+                            f"[dim]{total_chars} 字[/dim]"
+                        )
                     else:
-                        # 非 TTY（管道/重定向）：直接流式原文，不做 markdown
+                        # 非 TTY（管道/重定向）：直接流式原文
                         console.out(event.delta, end="")
                 elif isinstance(event, ToolCallStart):
-                    if not first_content_received:
-                        stop_status()
-                        first_content_received = True
-                    close_live()  # 工具调用打断正文：先把已吐出的正文段落定，再打工具行
+                    stop_status()
+                    flush_pending()
+                    if not is_tty and reply_parts:
+                        console.print()  # 收尾非 TTY 流式原文行
                     console.print(f"[dim]🔧 {event.tool_name} ...[/dim]")
                     logger.info("工具调用: %s, args: %s", event.tool_name, event.args)
                 elif isinstance(event, ToolCallEnd):
@@ -607,15 +604,16 @@ def chat(
                     logger.info("工具拒绝: %s", event.tool_name)
                 elif isinstance(event, TurnEnd):
                     stop_status()
-                    close_live()
-                    if reply_parts and not is_tty:
-                        # 非 TTY 下流式原文未带换行，这里补一个收尾
+                    if is_tty:
+                        flush_pending()
+                    elif reply_parts:
                         console.print()
                 elif isinstance(event, TurnError):
                     logger.error("TurnError: %s", event.error)
         except (Exception, KeyboardInterrupt) as e:
             stop_status()
-            close_live()  # 异常/中断时把半截 live 落定，避免终端 live 状态残留
+            if is_tty:
+                flush_pending()  # 中断/出错前已生成的正文也落定，别丢
             if isinstance(e, KeyboardInterrupt):
                 console.print("\n[dim]已中断。[/dim]")
                 logger.info("用户中断第 %d 轮", turn_count)
@@ -625,7 +623,6 @@ def chat(
             continue
         finally:
             stop_status()
-            close_live()
 
         console.print()
         reply = "".join(reply_parts)
