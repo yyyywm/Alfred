@@ -26,6 +26,7 @@ import typer
 from prompt_toolkit import PromptSession
 from prompt_toolkit.styles import Style
 from rich.console import Console
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 
@@ -529,7 +530,7 @@ def chat(
         turn_count += 1
         logger.info("第 %d 轮输入，长度: %d", turn_count, len(user_input))
 
-        reply_parts: list[str] = []
+        reply_parts: list[str] = []          # 整轮全部文本，跨工具调用拼接，供记忆沉淀
         status = console.status("[bold green]助手正在思考...[/bold green]", spinner="dots")
         status.start()
         status_active = True
@@ -540,6 +541,37 @@ def chat(
                 status.stop()
                 status_active = False
 
+        # 保留模式 markdown 渲染：把助手正文当作一个 live 区，每来一个 chunk 整体重渲染
+        # + 帧间 diff 原地补丁，live 区在 stop() 前不进 scrollback，因此不会出现「原文 +
+        # 重渲染」两遍（3e5f26d 之前用 \x1b[s/\x1b[u 回滚流式区域才会两遍）。这是 pi /
+        # kimi-code / Claude Code 的同款做法，Rich 的 Live 即其 Python 等价实现。
+        is_tty = console.is_terminal
+        live = None
+        segment_parts: list[str] = []        # 当前 live 段的文本；工具调用会切断一段
+
+        def render_reply(text: str) -> Markdown:
+            return Markdown(text)
+
+        def open_live() -> None:
+            nonlocal live
+            live = Live(
+                render_reply(""),
+                console=console,
+                transient=False,           # 结束后正文留在屏幕
+                refresh_per_second=12,      # 节流，避免逐 token 全量重绘
+                vertical_overflow="visible",
+            )
+            live.start()
+
+        def close_live() -> None:
+            """把当前 live 段落定为最终 markdown 并关闭；幂等。"""
+            nonlocal live
+            if live is not None:
+                live.update(render_reply("".join(segment_parts).strip()))
+                live.stop()
+                live = None
+            segment_parts.clear()
+
         first_content_received = False
 
         try:
@@ -549,13 +581,21 @@ def chat(
                     if not first_content_received:
                         stop_status()
                         first_content_received = True
-                        console.print("[bold green]助手：[/bold green] ", end="")
-                    console.out(event.delta, end="")
+                        console.print("[bold green]助手：[/bold green]")
                     reply_parts.append(event.delta)
+                    if is_tty:
+                        segment_parts.append(event.delta)
+                        if live is None:
+                            open_live()
+                        live.update(render_reply("".join(segment_parts)))
+                    else:
+                        # 非 TTY（管道/重定向）：直接流式原文，不做 markdown
+                        console.out(event.delta, end="")
                 elif isinstance(event, ToolCallStart):
                     if not first_content_received:
                         stop_status()
                         first_content_received = True
+                    close_live()  # 工具调用打断正文：先把已吐出的正文段落定，再打工具行
                     console.print(f"[dim]🔧 {event.tool_name} ...[/dim]")
                     logger.info("工具调用: %s, args: %s", event.tool_name, event.args)
                 elif isinstance(event, ToolCallEnd):
@@ -567,15 +607,15 @@ def chat(
                     logger.info("工具拒绝: %s", event.tool_name)
                 elif isinstance(event, TurnEnd):
                     stop_status()
-                    if reply_parts:
-                        # 流式文本已在 AssistantChunk 阶段实时输出，这里补一个换行收尾即可。
-                        # 不再做「清屏 + Markdown 重渲染」——ANSI 光标转义（\x1b[s / \x1b[u\x1b[J）
-                        # 在部分终端下清不掉流式区域，会导致同一回复输出两次（曾出现的 bug）。
+                    close_live()
+                    if reply_parts and not is_tty:
+                        # 非 TTY 下流式原文未带换行，这里补一个收尾
                         console.print()
                 elif isinstance(event, TurnError):
                     logger.error("TurnError: %s", event.error)
         except (Exception, KeyboardInterrupt) as e:
             stop_status()
+            close_live()  # 异常/中断时把半截 live 落定，避免终端 live 状态残留
             if isinstance(e, KeyboardInterrupt):
                 console.print("\n[dim]已中断。[/dim]")
                 logger.info("用户中断第 %d 轮", turn_count)
@@ -585,6 +625,7 @@ def chat(
             continue
         finally:
             stop_status()
+            close_live()
 
         console.print()
         reply = "".join(reply_parts)
