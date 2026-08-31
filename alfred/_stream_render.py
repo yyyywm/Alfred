@@ -3,26 +3,47 @@
 Why this exists (and why not Rich ``Live``)
 -------------------------------------------
 Rich ``Live`` redraws each frame by erasing the *previous* frame with a
-multi-line cursor-up (``\\x1b[<N>A``) whose ``N`` is tracked by Live's own
-internal accounting. In some terminals — especially with CJK text and tables —
-that accounting lands on ~0, so nothing is erased and every refresh *appends*
-a full copy of the accumulated markdown (the "blowup" / snowball). A
-single-line spinner never hit this because it only cursor-ups 1.
+multi-line cursor-up whose ``N`` is its own internal accounting. In some
+terminals — CJK + tables — that accounting lands on ~0, so nothing is erased
+and every refresh *appends* a full copy (the "blowup" / snowball).
 
-This module reuses Rich *only to render* (``Console.capture()`` of
-``console.print(Markdown(text))`` returns the exact styled, wrapped lines —
-CJK wraps and table boxes included), but drives the erase ourselves: we
-always erase exactly the number of lines we last wrote, so the count can
-never be wrong. No snowball is possible in any branch.
+A naive "erase the whole frame, redraw" fix (this module's first version) is
+also broken, for a subtler reason: in a *scrolling* terminal the cursor sits
+near the bottom of the viewport once there is any chat history above. As soon
+as a frame is taller than the room below the cursor, drawing it *scrolls*,
+and ``cursor-up N`` can no longer reach the frame's top (it has scrolled into
+scrollback). The next erase then ``clear-to-end``s the wrong region — the
+visible screen goes blank, and the final markdown is dumped once at ``close``.
+Exactly the "blank then dump" failure.
 
-The one case where erase-above-the-viewport is impossible — a frame taller
-than the terminal — is handled by *locking*: we stop live re-rendering and
-dump the final markdown as a plain append on ``close()``. Pathological inputs
-degrade gracefully instead of stacking.
+The design here
+---------------
+Two observations make streaming markdown work in a scrolling terminal:
+
+1. **Commit completed blocks; re-render only the in-progress block.**
+   Markdown is block-structured (headings, paragraphs, tables, …). A block is
+   "complete" once a blank line (``\\n\\n``) follows it; its rendering is then
+   final and will not reflow as more text arrives. We commit completed blocks
+   to scrollback once (plain append, never touched again) and keep only the
+   *last, in-progress* block live, re-rendering it in place each flush. This is
+   what makes tables correct: a table is one block, re-rendered whole as rows
+   arrive (column widths settle), and committed only once it ends.
+
+2. **A live block no taller than the screen is always erasable.**
+   When a block of ``L`` lines (``L < terminal height``) is drawn, it lands at
+   the bottom of the viewport — either in place (room below the cursor) or by
+   scrolling earlier content into scrollback. In both cases, after the draw
+   the block occupies the bottom ``L`` rows and the cursor rests one line
+   below it, so ``cursor-up L`` reliably reaches the block's top. Erase =
+   ``cursor-up L`` + clear-to-end is therefore exact for any ``L < height``.
+
+For a pathological single block taller than the terminal, erase-above-viewport
+is impossible, so we *lock*: stop live re-rendering and append the final
+markdown on ``close()``. Nothing ever doubles up.
 
 Live frames and the final frame both go through the same render console and
-the same ``emit`` path, so the segment never "snaps" between two styles — it
-is styled markdown throughout, growing token by token.
+emit path, so a segment never "snaps" between two styles — styled markdown
+throughout, growing block by block.
 """
 
 from __future__ import annotations
@@ -33,23 +54,18 @@ from typing import Callable, List
 from rich.console import Console
 from rich.markdown import Markdown
 
-CUR_UP = "\x1b[{n}A"      # cursor up n lines
+CUR_UP = "\x1b[{n}A"       # cursor up n lines
 CR = "\r"
-CLEAR_TO_END = "\x1b[J"   # erase from cursor to end of screen (CSI 0J)
+CLEAR_BELOW = "\x1b[J"     # erase cursor -> end of screen (CSI 0J)
 
 
 class StreamMarkdown:
     """In-place streaming markdown for one assistant segment.
 
-    The caller feeds text deltas via :meth:`update` as they arrive, then
-    finalizes with :meth:`close` (which erases the live partial and appends the
-    final, fully-rendered markdown). Between calls the rendered frame stays on
-    screen; each ``update`` erases exactly the previous frame and redraws, so
-    the user sees styled markdown grow token by token.
-
-    All cursor math is driven by line counts obtained from Rich's own renderer
-    (``Console.capture``), never by Rich ``Live``'s internal accounting. Erase
-    count == last drawn line count, always.
+    Feed text deltas via :meth:`update` as they arrive, finalize with
+    :meth:`close` (which commits any still-live block). Completed blocks are
+    appended to scrollback; the in-progress block is re-rendered in place, so
+    the user sees styled markdown grow block by block.
     """
 
     def __init__(
@@ -62,15 +78,14 @@ class StreamMarkdown:
         throttle_s: float = 0.03,
     ) -> None:
         self._emit = emit
-        self._term_height = max(3, term_height)
+        self._height = max(3, term_height)
         # Render one column narrower than the terminal so full-width table
         # boxes (which span the render width exactly) never trigger the
-        # terminal's auto-wrap. Auto-wrap drops the cursor onto a line we did
-        # not account for, which is the root of cursor-tracking drift. The
-        # 1-col margin removes that ambiguity; every line we emit ends at a
-        # deterministic column. A dedicated render console carries the real
-        # console's color system, so live frames are styled just like a normal
-        # console.print(Markdown) would be.
+        # terminal's auto-wrap. Auto-wrap drops the cursor onto an unaccounted
+        # line, which is the root of cursor-tracking drift. The 1-col margin
+        # removes that ambiguity; every line we emit ends at a deterministic
+        # column. The render console carries the real console's color system so
+        # live frames are styled exactly like a normal console.print(Markdown).
         self._render_width = max(20, term_width - 1)
         self._rcon = Console(
             width=self._render_width,
@@ -80,14 +95,15 @@ class StreamMarkdown:
         )
         self._throttle = throttle_s
         self._text: str = ""
-        self._shown: int = 0           # screen lines currently on display
-        self._locked: bool = False    # True once a frame would exceed the viewport
+        self._committed: int = 0      # rendered lines already in scrollback
+        self._live_h: int = 0        # lines of the in-place live block on screen
+        self._locked: bool = False   # True once the live block overflows the viewport
         self._last_render: float = 0.0
         self._dirty: bool = False
 
     # -- rendering ---------------------------------------------------------
     def _frame_lines(self, text: str) -> List[str]:
-        """Exact styled screen lines for the current segment text."""
+        """Exact styled screen lines for ``text``."""
         with self._rcon.capture() as cap:
             self._rcon.print(Markdown(text))
         out = cap.get()
@@ -95,20 +111,43 @@ class StreamMarkdown:
             out = out[:-1]
         return out.split("\n")
 
-    # -- low-level terminal ops -------------------------------------------
-    def _erase(self, n: int) -> None:
-        # Cursor is at col 0 of the line *below* our frame (we always emit a
-        # trailing newline after a draw). Up n -> top of our frame; clear-to-end
-        # wipes the frame plus the blank line below. Exact for any n < height.
-        self._emit(CR)
-        if n > 0:
-            self._emit(CUR_UP.format(n=n))
-        self._emit(CLEAR_TO_END)
+    def _stable_prefix_len(self, full: List[str]) -> int:
+        """How many leading lines of ``full`` are finalized blocks.
 
-    def _draw(self, lines: List[str]) -> None:
-        # trailing newline -> cursor lands at col 0 of the line below the frame,
-        # which is the invariant _erase relies on.
-        self._emit("\n".join(lines) + "\n")
+        A block finalizes at a blank line (``\\n\\n``). Everything up to and
+        including the last such break renders to stable lines that will not
+        reflow as more text arrives. We render that prefix separately and
+        confirm it matches the head of ``full`` (it must, for independent
+        markdown blocks); if it ever does not, we keep everything live rather
+        than risk committing a divergent prefix.
+        """
+        idx = self._text.rfind("\n\n")
+        if idx < 0:
+            return 0
+        stable = self._frame_lines(self._text[: idx + 2])
+        # Trailing blank lines are ambiguous (Rich may trim them differently
+        # when more content follows), so commit only the non-blank head.
+        k = len(stable)
+        while k > 0 and stable[k - 1] == "":
+            k -= 1
+        if k > len(full):
+            return 0
+        for i in range(k):
+            if full[i] != stable[i]:
+                return 0
+        return k
+
+    # -- low-level terminal ops -------------------------------------------
+    def _erase_live(self) -> None:
+        """Erase the in-place live block (``self._live_h`` lines)."""
+        if self._live_h > 0:
+            self._emit(CR + CUR_UP.format(n=self._live_h) + CLEAR_BELOW)
+            self._live_h = 0
+
+    def _commit(self, lines: List[str]) -> None:
+        """Append lines to scrollback permanently (each followed by a newline)."""
+        if lines:
+            self._emit("\n".join(lines) + "\n")
 
     # -- public API --------------------------------------------------------
     def update(self, delta: str) -> None:
@@ -116,10 +155,10 @@ class StreamMarkdown:
             return
         self._text += delta
         self._dirty = True
-        # Render the first frame immediately so the user sees something fast,
-        # then throttle subsequent frames to avoid per-token full redraws.
+        # First frame renders immediately for fast feedback; later frames are
+        # throttled to avoid per-token full redraws.
         now = time.monotonic()
-        if self._shown == 0 or now - self._last_render >= self._throttle:
+        if self._live_h == 0 and not self._locked or now - self._last_render >= self._throttle:
             self._last_render = now
             self._flush()
 
@@ -127,32 +166,60 @@ class StreamMarkdown:
         if not self._dirty or self._locked:
             return
         self._dirty = False
-        lines = self._frame_lines(self._text)
-        n = len(lines)
-        if n >= self._term_height:
-            # Would overflow the viewport: erase the partial we have (safe,
-            # it's < height) and stop live re-rendering. The final markdown is
-            # appended on close(), so nothing doubles up.
-            self._erase(self._shown)
-            self._shown = 0
-            self._locked = True
+        full = self._frame_lines(self._text)
+
+        # Newly-finalized blocks: commit their lines (never de-commit).
+        commit_to = max(self._stable_prefix_len(full), self._committed)
+        # The in-progress block, i.e. everything after what is finalized.
+        live = full[commit_to:]
+        L = len(live)
+
+        will_commit = commit_to > self._committed
+        will_draw = L > 0 and L < self._height  # fits the viewport → in place
+
+        # Erasing makes room: newly-committed lines and the new in-place block
+        # both start where the old live block was. Crucially, we do NOT erase
+        # when we're about to lock (L >= height): erase-above-viewport is
+        # impossible there, so erasing would only blank the last good render.
+        # Keeping it (stale, but visible) is far better than a blank viewport.
+        if will_commit or will_draw:
+            self._erase_live()
+
+        if will_commit:
+            self._commit(full[self._committed : commit_to])
+            self._committed = commit_to
+
+        if L == 0:
             return
-        self._erase(self._shown)
-        self._draw(lines)
-        self._shown = n
+
+        if will_draw:
+            # Fits the viewport: re-render the in-progress block in place.
+            self._emit("\n".join(live) + "\n")
+            self._live_h = L
+        else:
+            # Block reaches/exceeds the viewport: cursor-up can no longer
+            # reach a top that has scrolled off, so in-place erase would
+            # snowball. Lock — the last in-place render stays visible (we did
+            # not erase) and close() emits the final markdown.
+            self._locked = True
 
     def close(self) -> None:
-        """Finalize: erase the live partial and append the final markdown.
+        """Finalize: erase any live block and commit whatever is left.
 
-        Idempotent. The final frame uses the same render console and emit path
-        as the live frames, so there is no style/width snap at the end.
+        Emits only the *uncommitted* remainder (``full[self._committed:]``),
+        never the full text — completed blocks were already appended to
+        scrollback as they finalized, so re-emitting the whole document would
+        double them (most visibly in the lock path, where much was committed
+        before the live block overflowed). Idempotent.
         """
-        if self._shown or self._locked:
-            self._erase(self._shown)
-            self._shown = 0
-            self._locked = False
+        self._erase_live()
+        self._locked = False
         self._dirty = False
         text = self._text
+        committed = self._committed
         self._text = ""
+        self._committed = 0
         if text.strip():
-            self._emit("\n".join(self._frame_lines(text)) + "\n")
+            remaining = self._frame_lines(text)[committed:]
+            if remaining:
+                self._emit("\n".join(remaining) + "\n")
