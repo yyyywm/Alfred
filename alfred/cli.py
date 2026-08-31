@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -48,6 +49,7 @@ from alfred.events import (
 )
 
 from .agent import AlfredDeps, build_agent, chat_turn_stream
+from ._stream_render import StreamMarkdown
 from .config import load_config
 from .history import Session, delete_session, list_sessions
 from .memory import longterm
@@ -530,8 +532,6 @@ def chat(
         logger.info("第 %d 轮输入，长度: %d", turn_count, len(user_input))
 
         reply_parts: list[str] = []          # 整轮全部文本，供记忆沉淀
-        pending: list[str] = []               # 当前未落定的正文段；工具调用/TurnEnd 时落定
-        header_printed = False
         total_chars = 0
         is_tty = console.is_terminal
 
@@ -540,36 +540,41 @@ def chat(
             status.start()
         status_active = is_tty
 
+        # 流式 markdown（保留模式）：每个 AssistantChunk 把当前段整体重渲染，擦除量 =
+        # 上一帧精确行数（由 Rich capture 给出，CJK 自动换行 / 表格框线都算对），结构上
+        # 不可能像 Rich Live 那样滚雪球——Live 靠自己记账「上一帧几行」，在此终端算成
+        # ~0 → 不擦 → 每帧整段往下追加一份 = 爆屏。这里擦除量永远等于我们上次写下去的
+        # 行数，不会错。超长段落（≥终端高）回锁定，close() 追加最终 markdown。详见
+        # alfred._stream_render。
+        stream: StreamMarkdown | None = None
+
         def stop_status() -> None:
             nonlocal status_active
             if status_active:
                 status.stop()
                 status_active = False
 
-        def resume_status() -> None:
-            nonlocal status_active
-            if not status_active and is_tty:
-                status.start()
-                status_active = True
+        def _emit(s: str) -> None:
+            # 流式帧的裸字节出口：绕开 console 的渲染层，把光标控制序列直接落终端。
+            console.file.write(s)
+            console.file.flush()
 
-        def flush_pending() -> None:
-            """把当前正文段以 markdown 一次性落定到 scrollback。
+        def open_stream() -> None:
+            """首段正文到达：落「助手：」头并开启流式渲染区。"""
+            nonlocal stream
+            console.print("[bold green]助手：[/bold green]")
+            console.file.flush()
+            cols, rows = shutil.get_terminal_size((80, 24))
+            stream = StreamMarkdown(
+                console, _emit, term_width=cols, term_height=rows,
+            )
 
-            纯向下追加（console.print），不做任何多行光标回卷 / 原地重绘——因此不会出现
-            Rich Live 那种「每帧整段重叠堆积」的爆屏（上一版卡的就是这个 bug：Live 靠
-            多行光标上移擦上一帧再重画，在此终端里没生效，于是每帧整段往下追加一份）。
-            代价：正文不再逐字流式，改为每段结束一次性渲染 markdown；进度由单行 spinner
-            （status，单行原地刷新可靠）的字数反馈承担。
-            """
-            nonlocal header_printed
-            text = "".join(pending).strip()
-            pending.clear()
-            if not text:
-                return
-            if not header_printed:
-                console.print("[bold green]助手：[/bold green]")
-                header_printed = True
-            console.print(Markdown(text))
+        def close_stream() -> None:
+            """把当前流式段落定为最终 markdown 进 scrollback；幂等。"""
+            nonlocal stream
+            if stream is not None:
+                stream.close()
+                stream = None
 
         try:
             for event in chat_turn_stream(agent, deps, session, user_input, bus=EventBus()):
@@ -578,19 +583,15 @@ def chat(
                     reply_parts.append(event.delta)
                     total_chars += len(event.delta)
                     if is_tty:
-                        pending.append(event.delta)
-                        if not status_active:
-                            resume_status()
-                        status.update(
-                            f"[bold green]助手正在回复...[/bold green] "
-                            f"[dim]{total_chars} 字[/dim]"
-                        )
+                        if stream is None:
+                            stop_status()
+                            open_stream()
+                        stream.update(event.delta)
                     else:
                         # 非 TTY（管道/重定向）：直接流式原文
                         console.out(event.delta, end="")
                 elif isinstance(event, ToolCallStart):
-                    stop_status()
-                    flush_pending()
+                    close_stream()
                     if not is_tty and reply_parts:
                         console.print()  # 收尾非 TTY 流式原文行
                     console.print(f"[dim]🔧 {event.tool_name} ...[/dim]")
@@ -604,16 +605,14 @@ def chat(
                     logger.info("工具拒绝: %s", event.tool_name)
                 elif isinstance(event, TurnEnd):
                     stop_status()
-                    if is_tty:
-                        flush_pending()
-                    elif reply_parts:
+                    close_stream()
+                    if not is_tty and reply_parts:
                         console.print()
                 elif isinstance(event, TurnError):
                     logger.error("TurnError: %s", event.error)
         except (Exception, KeyboardInterrupt) as e:
             stop_status()
-            if is_tty:
-                flush_pending()  # 中断/出错前已生成的正文也落定，别丢
+            close_stream()  # 异常/中断时把半截正文也落定，别丢
             if isinstance(e, KeyboardInterrupt):
                 console.print("\n[dim]已中断。[/dim]")
                 logger.info("用户中断第 %d 轮", turn_count)
