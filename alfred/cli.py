@@ -36,6 +36,15 @@ from rich.panel import Panel
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+# Windows 中文终端的标准输出默认 GBK 编码，rich 打印 emoji（💭🔧💤 等）会触发
+# UnicodeEncodeError。在创建 Console 之前把 stdout/stderr 重配置为 UTF-8，避免崩溃。
+if sys.platform == "win32":
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
 from alfred.events import (
     AssistantChunk,
     ContextCompacted,
