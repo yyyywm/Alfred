@@ -29,3 +29,7 @@ alfred = "alfred.cli:app"
 
 [tool.setuptools.packages.find]
 include = ["alfred*"]
+
+[tool.setuptools.package-data]
+# 内置 skill 随包分发（bundled/<name>/SKILL.md）
+"alfred.skills" = ["bundled/*/SKILL.md"]

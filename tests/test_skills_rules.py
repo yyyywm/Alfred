@@ -1,8 +1,19 @@
 """skills / rules 加载器测试。"""
 
+import pytest
+
 from alfred.config import Config
 from alfred.rules.loader import render_rules, scan_rules
+from alfred.skills import loader
 from alfred.skills.loader import render_skills_index, scan_skills
+
+
+@pytest.fixture
+def no_bundled(tmp_path, monkeypatch):
+    """隔离包内置 bundled skill，让用例只扫描自己造的目录。"""
+    empty = tmp_path / "no-bundled"
+    empty.mkdir()
+    monkeypatch.setattr(loader, "_BUNDLED_DIR", empty)
 
 SKILL_MD = """---
 name: test-skill
@@ -35,7 +46,7 @@ def _config(tmp_path, skills_dir=None, rules_dir=None):
     })
 
 
-def test_scan_skills(tmp_path):
+def test_scan_skills(tmp_path, no_bundled):
     d = tmp_path / "skills" / "test-skill"
     d.mkdir(parents=True)
     (d / "SKILL.md").write_text(SKILL_MD, encoding="utf-8")
@@ -46,7 +57,7 @@ def test_scan_skills(tmp_path):
     assert "test-skill" in index and "SKILL.md" in index
 
 
-def test_skill_without_description_skipped(tmp_path):
+def test_skill_without_description_skipped(tmp_path, no_bundled):
     d = tmp_path / "skills" / "bad"
     d.mkdir(parents=True)
     (d / "SKILL.md").write_text("---\nname: bad\n---\n正文\n", encoding="utf-8")
@@ -65,6 +76,26 @@ def test_project_skills_discovered():
     assert len(skills) > 0
     # 每个技能都有合法名字
     assert all(s.name for s in skills)
+
+
+def test_bundled_skills_discovered():
+    """包内置 bundled 目录（alfred/skills/bundled/）的 skill 应被发现。"""
+    skills = scan_skills(Config(paths={"skills_dirs": []}))
+    bundled = [s for s in skills if loader._BUNDLED_DIR in s.path.parents]
+    assert any(s.name == "notion" for s in bundled)
+
+
+def test_user_skill_overrides_bundled(tmp_path):
+    """用户目录的同名 skill 优先于包内置 bundled 版本。"""
+    d = tmp_path / "skills" / "notion"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        "---\nname: notion\ndescription: 用户覆盖版\n---\n正文\n", encoding="utf-8"
+    )
+    skills = scan_skills(_config(tmp_path))
+    notion = [s for s in skills if s.name == "notion"]
+    assert len(notion) == 1
+    assert notion[0].description == "用户覆盖版"
 
 
 def test_skill_when_to_use_in_index(tmp_path):

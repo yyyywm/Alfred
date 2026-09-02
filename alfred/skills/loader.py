@@ -70,10 +70,19 @@ def parse_skill_md(path: Path) -> SkillMeta | None:
     )
 
 
+# 包内置 skill 目录：随源码分发，扫描优先级最低（用户目录同名 skill 覆盖内置版）。
+_BUNDLED_DIR = Path(__file__).parent / "bundled"
+
+
 def scan_skills(config: Config) -> list[SkillMeta]:
-    """扫描配置的技能目录。后面的目录优先级低（同名前者覆盖）。"""
+    """扫描技能目录。后面的目录优先级低（同名前者覆盖）。
+
+    用户配置的 skills_dirs 在前，包内置 bundled 目录殿后：
+    bundled 存放与 Alfred 工具链耦合的内置 skill（如 notion），
+    用户可在 ~/.agents/skills/ 放同名版本覆盖内置行为。
+    """
     seen: dict[str, SkillMeta] = {}
-    for d in config.paths.skills_dirs:
+    for d in [*config.paths.skills_dirs, _BUNDLED_DIR]:
         root = config.path(d)
         if not root.exists():
             continue

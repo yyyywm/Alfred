@@ -252,14 +252,16 @@ paths:
 
 ### Skills（技能）
 
-技能统一存放在用户级目录 `~/.agents/skills/`，本地所有 Alfred 实例共享同一份 skill 库。
+技能分两层：
 
-在 `~/.agents/skills/<name>/SKILL.md` 创建技能文件，含 YAML frontmatter（`name`、`description`）+ Markdown 正文，符合 Anthropic Agent Skills 标准格式。
+- **内置 skill**：`alfred/skills/bundled/` 随源码分发，开箱即用。当前内置 `notion`（通过 Notion 官方 CLI `ntn` 操作 Notion，前置条件：安装 `ntn`、`.env` 配置 `NOTION_API_TOKEN`、在 Notion 中把目标页面分享给 integration）。
+- **用户 skill**：`~/.agents/skills/<name>/SKILL.md`，本地所有 Alfred 实例共享同一份 skill 库；与用户 skill 同名时覆盖内置版本。
+
+创建用户技能：在 `~/.agents/skills/<name>/SKILL.md` 写 YAML frontmatter（`name`、`description`）+ Markdown 正文，符合 Anthropic Agent Skills 标准格式。
 
 - **索引注入**：启动时将每个 skill 的 name + description 注入系统 prompt，LLM 自行判断当前任务是否匹配
 - **零侵入**：不要求任何额外字段，任何第三方 skill 拿来即用
-- 扫描目录由 `paths.skills_dirs` 控制，默认 `~/.agents/skills`
-- **统一存储**：Alfred 不再维护项目级 `skills/` 目录，skill 即用户资产，跨项目复用
+- 用户 skill 扫描目录由 `paths.skills_dirs` 控制，默认 `~/.agents/skills`
 
 ### Rules（规则）
 

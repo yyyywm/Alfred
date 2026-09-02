@@ -114,8 +114,9 @@ Alfred/
 │   │   ├── ingest.py       # 笔记增量索引管线
 │   │   └── feed.py         # 喂书管线：分段通读 → 框架卡片 → 入库校验
 │   │
-│   ├── skills/             # 内置 skill 加载器
+│   ├── skills/             # skill 加载器 + 内置 skill
 │   │   ├── loader.py       # 扫描 SKILL.md、三级披露注入
+│   │   ├── bundled/        # 包内置 skill（随源码分发，最低优先级，可被用户同名覆盖）
 │   │   └── __init__.py
 │   └── rules/              # 规则文件加载器
 │       ├── loader.py       # 扫描 rules/*.md、frontmatter 触发器
@@ -304,7 +305,7 @@ python -m pytest tests/ -q
 - `test_blocks.py`：memory blocks 读写、字符上限、git 版本化、回滚
 - `test_chunking.py`：Markdown 切分、frontmatter 解析、超长段落二次切分
 - `test_memory_history.py`：召回预算/近因排序、会话历史持久化与重写
-- `test_skills_rules.py`：skills/rules 扫描、三级披露、frontmatter 触发器
+- `test_skills_rules.py`：skills/rules 扫描、三级披露、frontmatter 触发器、bundled 内置 skill 发现与用户覆盖
 - `test_longterm.py`：mem0 embedder 配置（local/openai_compat）、MemoryClient 协议
 - `test_embed.py`：embedding 配置与编码
 - `test_events.py`：事件总线与事件类型
@@ -334,15 +335,16 @@ python -m pytest tests/ -q
 ## 扩展机制
 
 ### Skills
-- 格式：`~/.agents/skills/<name>/SKILL.md`，YAML frontmatter + Markdown 正文
+- 分两层：
+  - **用户 skill**：`~/.agents/skills/<name>/SKILL.md`，跨项目复用的个人技能资产，扫描目录由 `config.yaml` 的 `paths.skills_dirs` 控制（默认 `~/.agents/skills`）。仓库根 `skills/` 当用户技能目录的做法已废弃。
+  - **内置 skill（bundled）**：`alfred/skills/bundled/<name>/SKILL.md`，与 Alfred 工具链耦合的能力（如 notion），随源码分发、零配置生效。loader 在扫完用户目录后追加扫描 bundled 目录，**同名 skill 用户目录优先**，bundled 仅兜底。
+- 格式：YAML frontmatter + Markdown 正文
 - 必填字段：`name`、`description`
 - 可选字段（零侵入，仿 Kimi Code skill 机制）：
   - `when-to-use`：触发场景的精确描述，注入索引时单独标注为"触发：…"，辅助 LLM 判断是否调用
   - `disable-model-invocation: true`：标记为"仅用户主动触发"，注入索引时单独归类并附显式禁令，LLM 不会自动调用
 - 启动时将每个 skill 的 name + description + when-to-use 注入系统 prompt，LLM 自行判断任务是否匹配
 - 推荐正文分节：Procedure / Specifications / Advice / Forbidden Actions / Required from User
-- 扫描目录由 `config.yaml` 的 `paths.skills_dirs` 控制，默认 `~/.agents/skills`
-- 项目级 `skills/` 目录已废弃：skill 即用户资产，统一放在 `~/.agents/skills/` 跨项目复用
 
 ### Rules
 - 格式：`rules/*.md`，含 YAML frontmatter
