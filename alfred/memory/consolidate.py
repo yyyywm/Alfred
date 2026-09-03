@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic_ai import Agent
+from pydantic_ai.settings import ModelSettings
 
 from ..config import Config
 from ..history import list_sessions
@@ -155,7 +156,10 @@ def generate_drafts(config: Config) -> dict | None:
         f"## 近期对话记录\n{transcripts}\n\n"
         "请输出整理草稿 JSON。"
     )
-    result = agent.run_sync(prompt)
+    # 思考型模型（如 kimi k3）的 thinking tokens 计入 max_tokens 额度，
+    # pydantic-ai 对 AnthropicModel 默认 4096 会把草稿 JSON 截断成非法 JSON；
+    # 显式放大预算。16384 对 anthropic 端点需流式请求，pydantic-ai 自动降级处理。
+    result = agent.run_sync(prompt, model_settings=ModelSettings(max_tokens=16384))
     text = result.output.strip()
     # 容错：剥离可能的 markdown 代码围栏
     if text.startswith("```"):

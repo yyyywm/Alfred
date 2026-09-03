@@ -233,6 +233,46 @@ def test_apply_unattended_shrink_human_update_pending(tmp_path, monkeypatch):
     assert records[0]["drafts"].get("human_block_update") == short_update
 
 
+# ── P0-2b: generate_drafts 输出预算 ───────────────────────────────────
+
+def test_generate_drafts_passes_large_max_tokens(tmp_path, monkeypatch):
+    """generate_drafts 必须显式传够大的 max_tokens，否则输出被截断成非法 JSON。
+
+    回归：pydantic-ai 对 AnthropicModel 默认 max_tokens=4096，且思考型模型
+    （如 kimi k3）的 thinking tokens 也计入该额度。复盘草稿 JSON 写到一半被
+    截断 → json.loads 报 Unterminated string → "模型输出不是合法 JSON"。
+    """
+    from alfred.memory import consolidate, longterm
+
+    captured = {}
+
+    class FakeResult:
+        output = '{"memory_entries": [], "human_block_update": null}'
+
+    class FakeAgent:
+        def __init__(self, model, instructions=None):
+            pass
+
+        def run_sync(self, prompt, model_settings=None, **kwargs):
+            captured["model_settings"] = model_settings
+            return FakeResult()
+
+    monkeypatch.setattr(consolidate, "Agent", FakeAgent)
+    monkeypatch.setattr(consolidate, "_recent_transcripts", lambda cfg: "用户：你好\n助手：你好")
+    monkeypatch.setattr(consolidate, "build_model", lambda cfg, ref: object())
+    monkeypatch.setattr(longterm, "list_all", lambda cfg, **kw: [])
+
+    cfg = Config(memory={"dir": str(tmp_path / "mem")})
+    drafts = consolidate.generate_drafts(cfg)
+
+    settings = captured.get("model_settings")
+    assert settings is not None, "generate_drafts 必须显式传 model_settings"
+    assert settings.get("max_tokens", 0) >= 8192, (
+        f"max_tokens 预算不足（{settings.get('max_tokens')}），思考型模型会被截断"
+    )
+    assert drafts == {"memory_entries": [], "human_block_update": None}
+
+
 # ── P1: schedule_fire_pending 跨 session ──────────────────────────────
 
 def test_schedule_fire_pending_fires_and_marks(tmp_path):
