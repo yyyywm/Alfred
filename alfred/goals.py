@@ -68,7 +68,7 @@ def _load(config: Config, session_id: str) -> GoalState | None:
 def _save(state: GoalState, config: Config) -> None:
     path = _goal_path(config, state.session_id)
     data = asdict(state)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(data, ensure_ascii=True, indent=2), encoding="utf-8")
 
 
 def create_goal(config: Config, session_id: str, description: str) -> dict[str, Any]:
