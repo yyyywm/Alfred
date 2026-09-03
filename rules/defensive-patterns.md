@@ -51,3 +51,10 @@ alwaysApply: false
 **规则**：任何要独立运行的脚本，开头固定加：
   `sys.stdout.reconfigure(encoding="utf-8")`（裹 try/except），
   或干脆只用 ASCII 符号（[OK]/[FAIL]）。
+
+## 10. lancedb `list_tables()` 返回分页迭代器，不能直接做 `in` 成员判断
+**来源**：reembed_vectors.py 用 `"episodes" not in db.list_tables()` 判断表存在性，
+  实际返回 [('context',None), ('tables',[...]), ('page_token',None)] 元组流，
+  判断永远为 False，静默 skip 掉该处理的表。
+**规则**：判断表是否存在用 `try: db.open_table(name) except: ...`，
+  不要依赖 list_tables()/table_names() 的返回结构。
