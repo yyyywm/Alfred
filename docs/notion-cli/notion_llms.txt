@@ -1,0 +1,248 @@
+# Notion Docs
+
+- [Overview](https://developers.notion.com/guides/get-started/overview.md): Discover what Notion connections are, when to use each type, and what you can build.
+- [API quickstart](https://developers.notion.com/guides/get-started/quick-start.md): Create a page in your Notion workspace with a personal access token and a single API request.
+- [Personal access tokens](https://developers.notion.com/guides/get-started/personal-access-tokens.md): Create and use personal access tokens for user-scoped API and Workers access.
+- [Internal connections](https://developers.notion.com/guides/get-started/internal-connections.md): Learn how internal connections work, how permissions are managed, and how to create one.
+- [Public connections](https://developers.notion.com/guides/get-started/public-connections.md): Learn how public connections work, how users authorize them, and how to create one.
+- [Authorization](https://developers.notion.com/guides/get-started/authorization.md): This guide describes the authorization flows for Notion connections and personal access tokens.
+- [Secure API tokens](https://developers.notion.com/guides/get-started/handling-api-keys.md): Learn how to manage and secure your Notion API tokens.
+- [Preparing your connection for users](https://developers.notion.com/guides/get-started/preparing-for-users.md): Learn how to create databases, pages, and views in a user's workspace right after they install your public connection.
+- [List on the Marketplace](https://developers.notion.com/guides/get-started/marketplace-listing.md): Learn how to list your public connection on the Notion Marketplace.
+- [Overview](https://developers.notion.com/guides/notion-agent-apis/overview.md): Power apps and integrations with Custom Agents.
+- [Quickstart](https://developers.notion.com/guides/notion-agent-apis/quickstart.md): Pick a Custom Agent, start a chat, and read its reply through the API.
+- [Upgrading to public beta](https://developers.notion.com/guides/notion-agent-apis/upgrading-to-public-beta.md): Migrate your private alpha integration to the public beta.
+- [Notion MCP](https://developers.notion.com/guides/mcp/overview.md): Learn how MCP clients connect to your Notion workspace.
+- [Common MCP clients](https://developers.notion.com/guides/mcp/common-mcp-clients.md): Find setup documentation for MCP clients that can connect to Notion MCP.
+- [Connect to Notion MCP](https://developers.notion.com/guides/mcp/get-started-with-mcp.md): Connect an MCP client to your Notion workspace.
+- [Supported tools](https://developers.notion.com/guides/mcp/mcp-supported-tools.md): Learn what you can do with Notion MCP tools.
+- [Use Notion Skills with MCP](https://developers.notion.com/guides/mcp/notion-skills.md): Learn how MCP clients create, find, and use reusable instructions stored as Notion pages.
+- [Security best practices](https://developers.notion.com/guides/mcp/mcp-security-best-practices.md): Learn how to keep your workspace secure when using Notion MCP.
+- [Build an MCP client for Notion](https://developers.notion.com/guides/mcp/build-mcp-client.md): Connect a custom MCP client to Notion MCP with OAuth 2.0 and PKCE.
+- [Hosting Notion MCP locally](https://developers.notion.com/guides/mcp/hosting-open-source-mcp.md): Learn how and when to use the open-source Notion MCP server.
+- [Upgrade guide](https://developers.notion.com/guides/get-started/upgrade-guide-2026-03-11.md): Learn how to upgrade your connections to 2026-03-11.
+- [Upgrade guide](https://developers.notion.com/guides/get-started/upgrade-guide-2025-09-03.md): Learn how to upgrade your connections to 2025-09-03.
+- [FAQs](https://developers.notion.com/guides/get-started/upgrade-faqs-2025-09-03.md): Commonly asked questions about migrating to 2025-09-03.
+- [Working with page content](https://developers.notion.com/guides/data-apis/working-with-page-content.md): Learn about page content and how to add or retrieve it with the Notion API.
+- [Working with databases](https://developers.notion.com/guides/data-apis/working-with-databases.md): Learn about database schemas, querying databases, and more.
+- [Query large data sources](https://developers.notion.com/guides/data-apis/query-large-data-sources.md): Read every page in a data source that holds more rows than the per-query result limit.
+- [Creating pages from templates](https://developers.notion.com/guides/data-apis/creating-pages-from-templates.md): Learn how to apply data source templates to pages created in the Notion API.
+- [Working with views](https://developers.notion.com/guides/data-apis/working-with-views.md): Learn how to set up and manage database views using the Notion API.
+- [Working with comments](https://developers.notion.com/guides/data-apis/working-with-comments.md): Learn how to add and retrieve comments with the Notion API.
+- [Working with markdown content](https://developers.notion.com/guides/data-apis/working-with-markdown-content.md): Learn how to create, read, and update Notion page content using enhanced markdown instead of the block API.
+- [Enhanced markdown format](https://developers.notion.com/guides/data-apis/enhanced-markdown.md): Reference for the Notion-flavored Markdown format used by the markdown content endpoints.
+- [Working with files and media](https://developers.notion.com/guides/data-apis/working-with-files-and-media.md): Learn how to add and retrieve files and media on pages with the Notion API.
+- [Uploading small files](https://developers.notion.com/guides/data-apis/uploading-small-files.md): Learn how to send and attach files up to 20 MB using the Notion API.
+- [Retrieving existing files](https://developers.notion.com/guides/data-apis/retrieving-files.md): Learn how to get a download link for files in the Notion API.
+- [Uploading larger files](https://developers.notion.com/guides/data-apis/sending-larger-files.md): Learn how to send files larger than 20 MB in multiple parts.
+- [Importing external files](https://developers.notion.com/guides/data-apis/importing-external-files.md): Learn how to migrate files from an external URL to Notion.
+- [Example code](https://developers.notion.com/guides/resources/examples.md)
+- [Postman workspace](https://developers.notion.com/guides/resources/notion-s-api-workspace.md)
+- [Historical changelog](https://developers.notion.com/guides/resources/historical-changelog.md): View an archive of Notion Developers updates prior to September 2023
+- [Overview](https://developers.notion.com/compliance/overview.md): Enterprise-grade security and compliance features for tracking and auditing workspace activity in Notion.
+- [SIEM events](https://developers.notion.com/compliance/siem-events.md): A comprehensive list of webhook events available in your SIEM platform once you set up the Notion SIEM connection.
+- [Audit log events](https://developers.notion.com/compliance/audit-log-events.md): A comprehensive list of events tracked in the Notion audit log for compliance and security monitoring.
+- [Introduction](https://developers.notion.com/guides/link-previews/introduction.md): Learn how link previews work in Notion.
+- [Introduction](https://developers.notion.com/reference/intro.md): Learn the conventions, authentication, and pagination patterns used across the Notion API.
+- [Connection capabilities](https://developers.notion.com/reference/capabilities.md): Learn about the capabilities that control what a connection can do and see in a Notion workspace.
+- [Webhooks](https://developers.notion.com/reference/webhooks.md): Learn how your connection can automatically respond to workspace activity in real-time.
+- [Event types & delivery](https://developers.notion.com/reference/webhooks-events-delivery.md): Learn about the different event types and how they are delivered to your connection.
+- [Request limits](https://developers.notion.com/reference/request-limits.md): To ensure a consistent developer experience for all API users, the Notion API is rate limited and basic size limits apply to request parameters.
+- [Workspace block limits](https://developers.notion.com/reference/workspace-block-limits.md): Learn when the Free workspace block limit blocks an API write and how to handle the error.
+- [Status codes](https://developers.notion.com/reference/status-codes.md): Responses from the API use HTTP response codes to indicate general classes of success and error.
+- [Retrieve an async task](https://developers.notion.com/reference/retrieve-async-task.md): Retrieve the status and result of an async task.
+- [Versioning](https://developers.notion.com/reference/versioning.md): Learn about API change management and how to set the appropriate version in your connection.
+- [Changes by version](https://developers.notion.com/reference/changes-by-version.md)
+- [Block](https://developers.notion.com/reference/block.md): A block object represents a piece of content within Notion. The API translates the headings, toggles, paragraphs, lists, media, and more that you can interact with in the Notion UI as different [block type objects](/reference/block#block-type-objects).
+- [Rich text](https://developers.notion.com/reference/rich-text.md): Notion uses rich text to allow users to customize their content. Rich text refers to a type of document where content can be styled and formatted in a variety of customizable ways. This includes styling decisions, such as the use of italics, font size, and font color, as well as formatting, such as…
+- [Page](https://developers.notion.com/reference/page.md): The Page object contains the [page property values](/reference/page-property-values) of a single Notion page.
+- [Page properties](https://developers.notion.com/reference/page-property-values.md)
+- [Page property items](https://developers.notion.com/reference/property-item-object.md)
+- [Database](https://developers.notion.com/reference/database.md): Learn more about Notion's database object.
+- [Data source](https://developers.notion.com/reference/data-source.md): Learn more about Notion's data source object.
+- [Data source properties](https://developers.notion.com/reference/property-object.md): Data source property objects define the schema of a data source and are rendered as columns in the Notion UI.
+- [View](https://developers.notion.com/reference/view.md): Learn about the Notion view object and its properties.
+- [Comment](https://developers.notion.com/reference/comment-object.md): The Comment object represents a comment on a Notion page or block. Comments can be viewed or created by a connection that has access to the page/block and the correct capabilities. Please see the [Capabilities guide](/reference/capabilities) for more information on setting up your connection's capab…
+- [Comment attachment](https://developers.notion.com/reference/comment-attachment.md): The Comment Attachment object represents [files](/reference/file-object) that have been attached to a [Comment](/reference/comment-object).
+- [Comment display name](https://developers.notion.com/reference/comment-display-name.md): The Comment Display Name object represents the author name that shows up for a comment. This overrides the default author name when specified.
+- [File](https://developers.notion.com/reference/file-object.md): Files, images, and other media bring Notion pages to life — from rich visuals in image blocks to downloadable attachments in databases, or branded page icons and covers.
+- [File Upload](https://developers.notion.com/reference/file-upload.md): The [File Upload object](#object-properties) tracks the lifecycle of a file uploaded to Notion in the API.
+- [User](https://developers.notion.com/reference/user.md): The User object represents a user in a Notion workspace. Users include full workspace members, guests, and connections. You can find more information about members and guests in [this guide](https://www.notion.com/help/add-members-admins-guests-and-groups).
+- [Parent](https://developers.notion.com/reference/parent-object.md): Learn more about different parent objects that link together a workspace's entities in Notion's API.
+- [Emoji and icon](https://developers.notion.com/reference/emoji-and-icon.md): Learn how to use emoji and icon objects in the Notion API.
+- [Unfurl attribute (Link Previews)](https://developers.notion.com/reference/unfurl-attribute-object.md): A Link Preview is rendered from an array of unfurl attribute objects.
+- [Authentication](https://developers.notion.com/reference/authentication.md): Learn how to authenticate your connection requests using bearer tokens.
+- [Create a token](https://developers.notion.com/reference/create-a-token.md): Creates an access token that a third-party service can use to authenticate with Notion.
+- [Introspect a token](https://developers.notion.com/reference/introspect-token.md): Get a token's active status, scope, and issued time.
+- [Revoke a token](https://developers.notion.com/reference/revoke-token.md): Revoke an access token.
+- [Refresh a token](https://developers.notion.com/reference/refresh-a-token.md): Refreshes an access token, generating a new access token and new refresh token
+- [Append block children](https://developers.notion.com/reference/patch-block-children.md): Creates and appends new children blocks to the parent `block_id` specified. Blocks can be parented by other blocks, pages, or databases.
+- [Retrieve a block](https://developers.notion.com/reference/retrieve-a-block.md): Retrieves a [Block object](/reference/block) using the ID specified.
+- [Retrieve block children](https://developers.notion.com/reference/get-block-children.md): Returns a paginated array of child [block objects](/reference/block) contained in the block using the ID specified. In order to receive a complete representation of a block, you may need to recursively retrieve the block children of child blocks.
+- [Update a block](https://developers.notion.com/reference/update-a-block.md)
+- [Delete a block](https://developers.notion.com/reference/delete-a-block.md)
+- [Create a meeting note](https://developers.notion.com/reference/create-meeting-note.md): Creates AI meeting notes from an uploaded audio or video file.
+- [Query meeting notes](https://developers.notion.com/reference/query-meeting-notes.md): Query meeting notes for the workspace with optional filters, sorts, and a result limit.
+- [Create a page](https://developers.notion.com/reference/post-page.md): Use this API to create a new [page](/reference/page) as a child of an existing page or [data source](/reference/data-source).
+- [Retrieve a page](https://developers.notion.com/reference/retrieve-a-page.md)
+- [Retrieve a page property item](https://developers.notion.com/reference/retrieve-a-page-property.md)
+- [Move a page](https://developers.notion.com/reference/move-page.md): Use this API to move an existing Notion page to a new parent.
+- [Update page](https://developers.notion.com/reference/patch-page.md): Use this API to modify attributes of a Notion page, such as its properties, icon, or cover.
+- [Trash a page](https://developers.notion.com/reference/trash-page.md)
+- [Retrieve a page as markdown](https://developers.notion.com/reference/retrieve-page-markdown.md): Retrieve the content of a page rendered as enhanced markdown.
+- [Update a page's content as markdown](https://developers.notion.com/reference/update-page-markdown.md): Insert or replace content in a page using enhanced markdown.
+- [Create a database](https://developers.notion.com/reference/create-database.md): Create a database and its initial data source.
+- [Update a database](https://developers.notion.com/reference/update-database.md): Updates the attributes — the title, description, icon, or cover, etc. — of a specified database.
+- [Retrieve a database](https://developers.notion.com/reference/retrieve-database.md)
+- [Create a data source](https://developers.notion.com/reference/create-a-data-source.md)
+- [Retrieve a data source](https://developers.notion.com/reference/retrieve-a-data-source.md)
+- [List data source templates](https://developers.notion.com/reference/list-data-source-templates.md): Use this API to retrieve details of all page templates available for a data source.
+- [Update a data source](https://developers.notion.com/reference/update-a-data-source.md)
+- [Update data source properties](https://developers.notion.com/reference/update-data-source-properties.md): The API represents columns of a data source in the Notion app UI as data source **properties**.
+- [Query a data source](https://developers.notion.com/reference/query-a-data-source.md)
+- [Filter data source entries](https://developers.notion.com/reference/filter-data-source-entries.md): Learn how to specify which pages from a data source to return.
+- [Sort data source entries](https://developers.notion.com/reference/sort-data-source-entries.md): A sort is a condition used to order the entries returned from a data source query.
+- [Create a database](https://developers.notion.com/reference/create-a-database.md)
+- [Retrieve a database](https://developers.notion.com/reference/retrieve-a-database.md)
+- [Get databases](https://developers.notion.com/reference/get-databases.md)
+- [Post database query](https://developers.notion.com/reference/post-database-query.md)
+- [Filter database entries](https://developers.notion.com/reference/post-database-query-filter.md)
+- [Sort database entries](https://developers.notion.com/reference/post-database-query-sort.md)
+- [Update a database](https://developers.notion.com/reference/update-a-database.md)
+- [Update database properties](https://developers.notion.com/reference/update-property-schema-object.md)
+- [Create comment](https://developers.notion.com/reference/create-a-comment.md): Creates a comment on a page, block, or existing discussion thread.
+- [Update comment](https://developers.notion.com/reference/update-a-comment.md): Updates a comment by its `comment_id`.
+- [Delete comment](https://developers.notion.com/reference/delete-a-comment.md): Deletes a comment by its `comment_id`.
+- [Retrieve a comment](https://developers.notion.com/reference/retrieve-comment.md): Retrieves a [Comment object](/reference/comment-object) from its `comment_id`.
+- [List comments](https://developers.notion.com/reference/list-comments.md): Retrieves a list of un-resolved [Comment objects](/reference/comment-object) from a page or block.
+- [Create a view](https://developers.notion.com/reference/create-view.md): Create a new view on a database or add a widget view to a dashboard.
+- [Retrieve a view](https://developers.notion.com/reference/retrieve-a-view.md): Retrieve a view by its ID.
+- [Update a view](https://developers.notion.com/reference/update-a-view.md): Update a view's name, filter, sorts, or configuration.
+- [Delete a view](https://developers.notion.com/reference/delete-view.md): Delete a view from a database.
+- [List views](https://developers.notion.com/reference/list-views.md): List all views in a database.
+- [Create a view query](https://developers.notion.com/reference/create-view-query.md): Execute a view's query and return the first page of results.
+- [Get view query results](https://developers.notion.com/reference/get-view-query-results.md): Paginate through cached view query results.
+- [Delete a view query](https://developers.notion.com/reference/delete-view-query.md): Delete a cached view query.
+- [Create a file upload](https://developers.notion.com/reference/create-file.md): Use this API to initiate the process of [uploading a file](/guides/data-apis/working-with-files-and-media) to your Notion workspace.
+- [Send a file upload](https://developers.notion.com/reference/upload-file.md): Use this API to transmit file contents to Notion for a [file upload](/reference/file-upload).
+- [Complete a file upload](https://developers.notion.com/reference/complete-file-upload.md): Use this API to finalize a `mode=multi_part` [file upload](/reference/file-upload) after all of the parts have been sent successfully.
+- [Retrieve a file upload](https://developers.notion.com/reference/retrieve-file-upload.md): Use this API to get the details of a [File Upload](/reference/file-upload) object.
+- [List file uploads](https://developers.notion.com/reference/list-file-uploads.md): Use this API to retrieve [file uploads](/reference/file-upload) for the current bot connection, sorted by most recent first.
+- [Search by title](https://developers.notion.com/reference/post-search.md): Searches all parent or child pages and data_sources that have been shared with a connection.
+- [Search optimizations and limitations](https://developers.notion.com/reference/search-optimizations-and-limitations.md)
+- [List all users](https://developers.notion.com/reference/get-users.md): Returns a paginated list of [Users](/reference/user) for the workspace. The response may contain fewer than `page_size` of results.
+- [Retrieve a user](https://developers.notion.com/reference/get-user.md): Retrieves a [User](/reference/user) using the ID specified.
+- [Retrieve your token's bot user](https://developers.notion.com/reference/get-self.md): Retrieves the [User](/reference/user) associated with the API token provided in the authorization header.
+- [List custom emojis](https://developers.notion.com/reference/list-custom-emojis.md): Retrieves a list of custom emojis in the workspace.
+- [Query agents](https://developers.notion.com/reference/notion-agent-apis/query-agents.md): Find Custom Agents that an integration can access.
+- [Retrieve an agent](https://developers.notion.com/reference/notion-agent-apis/retrieve-agent.md): Retrieve metadata for one accessible Custom Agent.
+- [Retrieve agent insights](https://developers.notion.com/reference/notion-agent-apis/retrieve-agent-insights.md): Retrieve configuration and usage insights for a Custom Agent or the authenticated user's personal agent.
+- [Update agent status](https://developers.notion.com/reference/notion-agent-apis/update-agent-status.md): Enable or disable a Custom Agent.
+- [Update an agent credit limit](https://developers.notion.com/reference/notion-agent-apis/update-agent-credit-limit.md): Set or clear the credit limit for a Custom Agent.
+- [Delete an agent](https://developers.notion.com/reference/notion-agent-apis/delete-agent.md): Soft-delete a Custom Agent that the integration can manage.
+- [Batch manage agent](https://developers.notion.com/reference/notion-agent-apis/batch-manage-agent.md): Asynchronously apply multiple agent management operations.
+- [Create or update a session](https://developers.notion.com/reference/notion-agent-apis/update-session.md): Start a session, send a message, submit an action, or stream a session turn.
+- [Retrieve a session](https://developers.notion.com/reference/notion-agent-apis/retrieve-session.md): Retrieve the status, metadata, and required actions for a session.
+- [Query sessions](https://developers.notion.com/reference/notion-agent-apis/query-sessions.md): Find agent sessions that an integration can access.
+- [Query session events](https://developers.notion.com/reference/notion-agent-apis/query-session-events.md): Retrieve a page of events from an accessible session.
+- [Cancel a session](https://developers.notion.com/reference/notion-agent-apis/cancel-session.md): Cancel an in-progress session.
+- [Page created](https://developers.notion.com/reference/webhooks/page-created.md): Webhook event for page created in a workspace
+- [Page content updated](https://developers.notion.com/reference/webhooks/page-content-updated.md): Webhook event for page content updated in a workspace
+- [Page properties updated](https://developers.notion.com/reference/webhooks/page-properties-updated.md): Webhook event for page properties updated in a workspace
+- [Page moved](https://developers.notion.com/reference/webhooks/page-moved.md): Webhook event for page moved in a workspace
+- [Page deleted](https://developers.notion.com/reference/webhooks/page-deleted.md): Webhook event for page deleted in a workspace
+- [Page undeleted](https://developers.notion.com/reference/webhooks/page-undeleted.md): Webhook event for page undeleted in a workspace
+- [Page locked](https://developers.notion.com/reference/webhooks/page-locked.md): Webhook event for page locked in a workspace
+- [Page unlocked](https://developers.notion.com/reference/webhooks/page-unlocked.md): Webhook event for page unlocked in a workspace
+- [Page transcript deleted](https://developers.notion.com/reference/webhooks/page-transcription-block-transcript-deleted.md): Webhook event for transcript deletion in a page's transcription block
+- [Database created](https://developers.notion.com/reference/webhooks/database-created.md): Webhook event for database created in a workspace
+- [Database content updated](https://developers.notion.com/reference/webhooks/database-content-updated.md): Webhook event for database content updated in a workspace
+- [Database schema updated](https://developers.notion.com/reference/webhooks/database-schema-updated.md): Webhook event for database schema updated in a workspace
+- [Database moved](https://developers.notion.com/reference/webhooks/database-moved.md): Webhook event for database moved in a workspace
+- [Database deleted](https://developers.notion.com/reference/webhooks/database-deleted.md): Webhook event for database deleted in a workspace
+- [Database undeleted](https://developers.notion.com/reference/webhooks/database-undeleted.md): Webhook event for database undeleted in a workspace
+- [Data source created](https://developers.notion.com/reference/webhooks/data-source-created.md): Webhook event for data source created in a workspace
+- [Data source content updated](https://developers.notion.com/reference/webhooks/data-source-content-updated.md): Webhook event for data source content updated in a workspace
+- [Data source schema updated](https://developers.notion.com/reference/webhooks/data-source-schema-updated.md): Webhook event for data source schema updated in a workspace
+- [Data source moved](https://developers.notion.com/reference/webhooks/data-source-moved.md): Webhook event for data source moved in a workspace
+- [Data source deleted](https://developers.notion.com/reference/webhooks/data-source-deleted.md): Webhook event for data source deleted in a workspace
+- [Data source undeleted](https://developers.notion.com/reference/webhooks/data-source-undeleted.md): Webhook event for data source undeleted in a workspace
+- [Comment created](https://developers.notion.com/reference/webhooks/comment-created.md): Webhook event for comment created in a workspace
+- [Comment updated](https://developers.notion.com/reference/webhooks/comment-updated.md): Webhook event for comment updated in a workspace
+- [Comment deleted](https://developers.notion.com/reference/webhooks/comment-deleted.md): Webhook event for comment deleted in a workspace
+- [File upload created](https://developers.notion.com/reference/webhooks/file-upload-created.md): Webhook event for file upload created in a workspace
+- [File upload completed](https://developers.notion.com/reference/webhooks/file-upload-completed.md): Webhook event for file upload completed in a workspace
+- [File upload expired](https://developers.notion.com/reference/webhooks/file-upload-expired.md): Webhook event for file upload expired in a workspace
+- [File upload failed](https://developers.notion.com/reference/webhooks/file-upload-upload-failed.md): Webhook event for file upload failed in a workspace
+- [View created](https://developers.notion.com/reference/webhooks/view-created.md): Webhook event for view created in a workspace
+- [View updated](https://developers.notion.com/reference/webhooks/view-updated.md): Webhook event for view updated in a workspace
+- [View deleted](https://developers.notion.com/reference/webhooks/view-deleted.md): Webhook event for view deleted in a workspace
+- [Notion CLI](https://developers.notion.com/cli/get-started/overview.md): Install the Notion CLI and learn the core commands for authentication, Notion Workers, and API requests.
+- [Installation](https://developers.notion.com/cli/get-started/installation.md): Install the Notion CLI on your machine.
+- [Authentication](https://developers.notion.com/cli/get-started/authentication.md): Log in to your Notion workspace and manage CLI credentials.
+- [API requests](https://developers.notion.com/cli/guides/api-requests.md): Make Notion API requests from the terminal.
+- [Data sources](https://developers.notion.com/cli/guides/data-sources.md): Create, query, and manage data sources from the terminal.
+- [File uploads](https://developers.notion.com/cli/guides/file-uploads.md): Upload local files or import external files into Notion from the terminal.
+- [Command reference](https://developers.notion.com/cli/reference/commands.md): Complete reference for all ntn commands.
+- [What are Notion Workers?](https://developers.notion.com/workers/get-started/overview.md): Learn what Notion Workers are, what you can build with them, and how they fit into Notion.
+- [Quickstart](https://developers.notion.com/workers/get-started/quickstart.md): Create and deploy your first worker in minutes.
+- [Syncs](https://developers.notion.com/workers/guides/syncs.md): Pull external data into Notion databases and keep it up to date.
+- [How to write an agent tool](https://developers.notion.com/workers/guides/tools.md): Build custom tools that Notion Custom Agents can call.
+- [Webhooks](https://developers.notion.com/workers/guides/webhooks.md): Receive HTTP events from external services in a Notion Worker.
+- [OAuth](https://developers.notion.com/workers/guides/oauth.md): Authenticate with third-party APIs like GitHub, Google, and Salesforce from a Notion Worker.
+- [How to manage secrets](https://developers.notion.com/workers/guides/secrets.md): Store API keys and credentials for your worker securely.
+- [Using Notion API from a worker](https://developers.notion.com/workers/guides/api-client.md): Read and write Notion pages and databases from inside a Notion Worker.
+- [Sharing Workers](https://developers.notion.com/workers/guides/sharing-workers.md): Share and collaborate with other workspace members on a Notion Worker.
+- [SDK reference](https://developers.notion.com/workers/reference/sdk.md): Complete reference for the @notionhq/workers SDK.
+- [Schema and builders](https://developers.notion.com/workers/reference/schema.md): Define database schemas, database property values, and tool schemas.
+- [Limits](https://developers.notion.com/workers/reference/limits.md): Rate limits and other quotas that apply to workers.
+- [Introduction](https://developers.notion.com/reference/admin/intro.md): Learn the conventions, authentication, and pagination patterns used for Notion's Admin API.
+- [Scopes](https://developers.notion.com/reference/admin/scopes.md): Admin API scopes control an organization bot token's access.
+- [Versioning](https://developers.notion.com/reference/admin/versioning.md): Learn about API change management and how to set the appropriate version in your connection.
+- [List legal holds](https://developers.notion.com/reference/admin/list-legal-holds.md): List all legal holds belonging to your organization.
+- [Add users to a legal hold](https://developers.notion.com/reference/admin/add-legal-hold-users.md): Add users to a legal hold.
+- [Create a legal hold](https://developers.notion.com/reference/admin/create-legal-hold.md): Create a legal hold.
+- [Export a legal hold](https://developers.notion.com/reference/admin/export-legal-hold.md): Export a legal hold.
+- [Retrieve a legal hold](https://developers.notion.com/reference/admin/get-legal-hold.md): Retrieve a legal hold.
+- [List pages on a legal hold](https://developers.notion.com/reference/admin/list-legal-hold-pages.md): List pages on a legal hold.
+- [List users on a legal hold](https://developers.notion.com/reference/admin/list-legal-hold-users.md): List users on a legal hold.
+- [List workspaces on a legal hold](https://developers.notion.com/reference/admin/list-legal-hold-workspaces.md): List workspaces on a legal hold.
+- [Release a legal hold](https://developers.notion.com/reference/admin/release-legal-hold.md): Release a legal hold.
+- [Remove a user from a legal hold](https://developers.notion.com/reference/admin/remove-legal-hold-user.md): Remove a user from a legal hold.
+- [Update a legal hold](https://developers.notion.com/reference/admin/update-legal-hold.md): Update a legal hold.
+- [Revoke a managed user's sessions](https://developers.notion.com/reference/admin/revoke-user-session.md): Revoke a managed user's sessions.
+- [List users](https://developers.notion.com/reference/admin/list-users.md): List active workspace members and guest bots.
+- [List groups](https://developers.notion.com/reference/admin/list-permission-groups.md): List permission groups in a workspace.
+- [Retrieve a group](https://developers.notion.com/reference/admin/retrieve-permission-group.md): Retrieve a permission group in a workspace.
+- [Create a group](https://developers.notion.com/reference/admin/create-permission-group.md): Create an admin-managed permission group in a workspace.
+- [Update a group](https://developers.notion.com/reference/admin/update-permission-group.md): Rename an admin-managed permission group.
+- [Delete a group](https://developers.notion.com/reference/admin/delete-permission-group.md): Delete an admin-managed permission group.
+- [List group members](https://developers.notion.com/reference/admin/list-permission-group-members.md): List a permission group's direct user memberships.
+- [Add a group member](https://developers.notion.com/reference/admin/add-permission-group-member.md): Add a direct user member to an admin-managed permission group.
+- [Update a group member](https://developers.notion.com/reference/admin/update-permission-group-member.md): Change a direct member's role in an admin-managed permission group.
+- [Remove a group member](https://developers.notion.com/reference/admin/remove-permission-group-member.md): Remove a direct user member from an admin-managed permission group.
+- [Get agents in a space](https://developers.notion.com/reference/admin/get-workflows-metadata-for-space.md): Get agents in a space.
+- [Get credit usage for an agent in a space](https://developers.notion.com/reference/admin/get-agent-credit-usage.md): Get credit usage for an agent in a space.
+- [Get credit usage for agents in a space](https://developers.notion.com/reference/admin/get-agents-credit-usage.md): Get credit usage for agents in a space.
+- [Update credit limit for an agent in a space](https://developers.notion.com/reference/admin/update-agent-credit-limit.md): Update credit limit for an agent in a space.
+- [Get a custom agent's sharing permissions](https://developers.notion.com/reference/admin/get-agent-permissions.md): Get a Custom Agent's sharing permissions.
+- [Update a custom agent's sharing permissions](https://developers.notion.com/reference/admin/update-agent-permissions.md): Update a Custom Agent's sharing permissions.
+- [Delete an agent in a space](https://developers.notion.com/reference/admin/delete-agent.md): Delete an agent in a space.
+- [Disable or re-enable an agent in a space](https://developers.notion.com/reference/admin/update-agent-status.md): Disable or re-enable an agent in a space.
+- [Update who can create agents in a space](https://developers.notion.com/reference/admin/update-agent-creation-policy.md): Update who can create agents in a space.
+- [Update the default agent credit limit for a workspace](https://developers.notion.com/reference/admin/update-workspace-credit-limit.md): Update the default agent credit limit for a workspace.
+- [List MCP client connections in an organization](https://developers.notion.com/reference/admin/list-mcp-client-connections.md): List members' connections to Notion through MCP clients.
+- [Revoke an MCP client connection](https://developers.notion.com/reference/admin/revoke-mcp-client-connection.md): Revoke a member's active connection to Notion from an MCP client.
+- [Deny or restore enterprise-managed MCP client access](https://developers.notion.com/reference/admin/update-mcp-client-connection-enterprise-managed-access.md): Deny or restore a member's access through enterprise-managed MCP connections.
+- [List personal access tokens in a workspace](https://developers.notion.com/reference/admin/list-personal-access-tokens.md): List active, expired, and revoked personal access tokens in a workspace.
+- [Revoke a personal access token in a workspace](https://developers.notion.com/reference/admin/revoke-personal-access-token.md): Permanently revoke a personal access token in a workspace.
+- [Enqueue a workspace export](https://developers.notion.com/reference/admin/enqueue-space-export.md): Enqueue a workspace export.
+- [Get workspace export status](https://developers.notion.com/reference/admin/get-space-export-status.md): Get workspace export status.
+- [Changelog](https://developers.notion.com/page/changelog.md)
+- [Examples](https://developers.notion.com/page/examples.md)
+
+## OpenAPI Specs
+
+- [openapi-adminApi](/openapi-adminApi.json)
+- [openapi-undocumented](/openapi-undocumented.json)
+- [openapi](/openapi.json)
