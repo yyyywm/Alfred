@@ -30,10 +30,13 @@ VDB = cfg.path(cfg.paths.vectordb_dir)
 def reembed_episodes():
     import lancedb
     db = lancedb.connect(str(VDB))
-    if "episodes" not in db.list_tables():
+    # 注意：新版 lancedb 的 list_tables() 返回分页迭代器（元素是 ('tables', [...]) 元组），
+    # 不能直接做成员判断；用 try/open 最稳
+    try:
+        t = db.open_table("episodes")
+    except Exception:
         print("[skip] episodes 表不存在")
         return
-    t = db.open_table("episodes")
     rows = t.to_pandas().to_dict("records")
     if not rows:
         print("[skip] episodes 为空")
