@@ -38,13 +38,15 @@ providers:
 
 models:
   # 闲聊/对话路径：可自由切换（chat 中 /model <provider>:<model>）
-  chat: shangtang:deepseek-v4-flash
+  # chat: shangtang:deepseek-v4-flash
+  chat: kimi-for-coding:k3
   # 记忆写入路径（事实抽取、consolidate 复盘）：固定用强模型，质量敏感
-  memory_write: shangtang:sensenova-6.8-flash-lite
+  # memory_write: shangtang:sensenova-6.8-flash-lite
+  memory_write: kimi-for-coding:k3
   # embedding：本地模型或 OpenAI 兼容 API，选定后不要换（换 = 全量重建索引）
   embed:
     provider: openai_compat     # local（本地 sentence-transformers）或 openai_compat（云端 API）
-    name: BAAI/bge-large-zh-v1.5
+    name: BAAI/bge-m3   # 8K 上下文（bge-large-zh 仅 512 token，长 chunk 会被 SiliconFlow 拒 400）；同为 1024 维
     device: null                 # null=自动；可填 cpu / mps / cuda（仅 local）
     # hf_endpoint: https://hf-mirror.com  # 国内下载镜像，默认走 huggingface.co（仅 local）
     # local_dir: null             # 模型已下载到本地目录时填这里，跳过远程下载（仅 local）
