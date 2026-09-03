@@ -39,3 +39,15 @@ alwaysApply: false
 ## 7. 工具函数返回 `message` 时，字符串必须与测试断言逐字一致
 **来源**：deny reason 句号偏差，测试没拦住但行为不标准。
 **规则**：用户可见字符串以测试为准；测试不覆盖时主动与旧版对齐。
+## 8. 调研/实验产生的临时文件必须当场归档或删除，不留项目根目录
+**来源**：Notion CLI 调研时下载的 ntn_*.md / notion_llms.txt 忘在项目根目录，
+  被用户发现"怎么多了这么多文件"。
+**规则**：下载的参考文档、临时导出、测试产物，用完立即移入 docs/ 对应子目录
+  或删除；每次任务收尾时 `dir` 检查一遍根目录有没有自己留下的残渣。
+
+## 9. Windows 上 Python 脚本 print 中文/符号前必须 reconfigure stdout 为 UTF-8
+**来源**：run_python 和 notion_sync.py 两次踩坑——控制台是 GBK，
+  print("✓"/中文) 直接 UnicodeEncodeError 把成功流程打断成假失败。
+**规则**：任何要独立运行的脚本，开头固定加：
+  `sys.stdout.reconfigure(encoding="utf-8")`（裹 try/except），
+  或干脆只用 ASCII 符号（[OK]/[FAIL]）。

@@ -158,3 +158,44 @@ agentmyself/
 - Graphiti 图谱记忆、MCP 对接（skills + 工具先覆盖）
 - handoff 式多智能体编排（一期仅 agents-as-tools 只读调查，且本期只留接口不实现）
 - 全自动无确认的自我改写（一切沉淀走草稿+确认）
+
+## 已确认问题（暂缓，待后续优化）
+
+### P1 — 更换 embedding 模型会导致向量库静默失效，且无任何校验
+**记录日期**：2026-08-30
+
+**现象**：换 embedding 模型后向量库不可用，但程序不崩溃、无告警。分两种情况：
+
+| 情况 | 表现 |
+|---|---|
+| 新模型维度**不同**（如 1024→384） | qdrant 插入时报 `Expected vector of size 1024, got 384`，但该异常在 `longterm.py:160` 被 catch 后只打日志，`audit.py:158` 仅报「长期记忆不可用」。**长期记忆悄悄停写**。 |
+| 新模型维度**相同**（如 1024→另一 1024 模型） | 无任何报错，新向量照常入库。但新旧向量处于**不同语义空间**，跨边界 cosine 计算为噪声，召回返回不相关记忆。这是最危险的情况，`audit` 抓不到。 |
+
+**根因**
+- 代码中**不存在维度校验**：`knowledge/embed.py:154` 暴露了 `dim()`，但没有任何调用方拿它比对配置或既有库 schema。
+- `memory/local.py:73` 硬编码回退：`embed_cfg.dims or 1024` —— 不填 `dims` 时按 1024 建集合，与实际模型输出维度无关。
+- 两个向量库需分别处理：qdrant（mem0 长期记忆，集合维度固定）与 lance（episodes/notes，表 schema 固定）。
+
+**注意**：`embed.py:48` 的 `normalize_embeddings=True` + qdrant Cosine 只保证量纲干净，**不等于**两个模型的空间可比较。
+
+**当前人工补救流程**（已验证可行）
+```bash
+# 1. config.yaml 显式填 dims = 新模型真实维度（不填会回退 1024，重新落进情况 A）
+# 2. 删向量索引（ingest_state.json 必须一起删，否则空库认为"已索引过"什么都不做）
+rm -rf data/vectordb/qdrant_mem0 \
+       data/vectordb/episodes.lance \
+       data/vectordb/notes.lance \
+       data/vectordb/ingest_state.json
+# 3. 重建：mem0 集合按新 dims 自动创建
+alfred ingest <笔记目录>
+```
+
+**数据影响**
+- `data/memory/{human,persona,lessons}.md` 为纯文本，与 embedding 模型无关，**不受影响**。
+- qdrant 中 mem0 抽取的记忆会丢失，但原始对话仍在 `data/history/`，跑 `/consolidate` 可从 transcript 重新提炼，**可恢复而非不可逆**。
+
+**优化方向（待定）**
+- 启动时校验：实际模型维度 vs 既有集合/表 schema，不一致则立即报错提示重建，而非静默降级。
+- 去掉 `local.py:73` 的 `or 1024` 回退，`dims` 缺失时从模型探测而非假设。
+- 提供显式 `alfred rebuild-index` 命令，封装上述删除+重建流程。
+
