@@ -127,3 +127,42 @@ def test_session_preview_fallback(tmp_path):
     s2 = Session(cfg)
     assert session_preview(cfg, s2.id) is None
     assert session_preview(cfg, "nonexistent") is None
+
+
+def test_resolve_session_ref_by_title(tmp_path):
+    from alfred.cli import _resolve_session_ref
+    from alfred.history import list_sessions
+    cfg = _cfg(tmp_path)
+    s1 = Session(cfg)
+    s1.add_user("a")
+    set_title(cfg, s1.id, "记账讨论", auto=False)
+    s2 = Session(cfg)
+    s2.add_user("b")
+    set_title(cfg, s2.id, "读书计划", auto=False)
+    s3 = Session(cfg)
+    s3.add_user("c")
+    set_title(cfg, s3.id, "健身计划", auto=False)
+
+    listed = list_sessions(cfg)
+    # 序号
+    assert _resolve_session_ref(cfg, "1", listed) == listed[0].id
+    # id 前缀
+    assert _resolve_session_ref(cfg, s1.id[:6], listed) == s1.id
+    # 标题唯一匹配（大小写不敏感）
+    assert _resolve_session_ref(cfg, "记账", listed) == s1.id
+    # 标题多匹配 → None（CLI 侧会列出候选）
+    assert _resolve_session_ref(cfg, "计划", listed) is None
+    # 都不匹配 → None
+    assert _resolve_session_ref(cfg, "不存在", listed) is None
+
+
+def test_set_title_if_absent_atomic(tmp_path):
+    """原子 check-and-set：已有标题（含自动标题）时拒绝写入。"""
+    from alfred.history import set_title_if_absent
+    cfg = _cfg(tmp_path)
+    s = Session(cfg)
+    s.add_user("内容")
+    assert set_title_if_absent(cfg, s.id, "自动标题") is True
+    assert get_title(cfg, s.id) == "自动标题"
+    assert set_title_if_absent(cfg, s.id, "又来一个") is False
+    assert get_title(cfg, s.id) == "自动标题"

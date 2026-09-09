@@ -3,7 +3,8 @@
 设计要点：
 - 生成走 models.chat 当前模型，后台 daemon 线程执行，失败静默降级记日志，
   不阻塞对话、不打印到终端（避免污染 prompt_toolkit 输入）。
-- write_auto_title 写前重读 meta 检查：手动标题（auto=False）永不被覆盖。
+- write_auto_title 走原子 check-and-set：已有标题（含自动标题）永不被覆盖
+  ——手动标题优先由此保证。
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import logging
 import threading
 
 from .config import Config
-from .history import get_title, set_title
+from .history import set_title_if_absent
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ def _clean_title(raw: str) -> str | None:
     text = raw.strip()
     if not text:
         return None
-    title = text.splitlines()[0].strip().strip("\"'「」。")
+    title = text.splitlines()[0].strip().strip("\"'「」。《》“”‘’【】")
     if not title:
         return None
     return title[:MAX_TITLE_CHARS]
@@ -51,7 +52,7 @@ def generate_title(config: Config, user_text: str, assistant_text: str) -> str |
             model_settings=ModelSettings(timeout=20, max_tokens=50),
         )
         # pydantic-ai 新版为 result.output，旧版为 result.data
-        raw = getattr(result, "output", None) or result.data
+        raw = getattr(result, "output", None) or getattr(result, "data", None)
         return _clean_title(raw)
     except Exception as e:
         logger.warning("自动生成会话标题失败: %s", e)
@@ -59,11 +60,8 @@ def generate_title(config: Config, user_text: str, assistant_text: str) -> str |
 
 
 def write_auto_title(config: Config, session_id: str, title: str) -> bool:
-    """仅当会话尚无标题时写入自动标题；返回是否写入。"""
-    if get_title(config, session_id) is not None:
-        return False
-    set_title(config, session_id, title, auto=True)
-    return True
+    """仅当会话尚无标题时写入自动标题（原子 check-and-set）；返回是否写入。"""
+    return set_title_if_absent(config, session_id, title)
 
 
 def maybe_generate_title_async(

@@ -4,7 +4,8 @@ chat 内斜杠命令：
   /exit 退出  /new 新会话  /model <provider:model> 切换闲聊模型
   /remember <内容> 显式教学（写入 human 块）
   /memory 查看长期记忆  /why 查看上一轮用了哪些记忆
-  /sessions 列出历史会话  /load <序号或id> 加载历史会话  /delete <序号或id> 删除会话
+  /sessions 列出历史会话（含标题）  /load <序号|id|标题关键词> 加载  /delete 同上
+  /title <标题> 设置当前会话标题（无参数查看）
   /lessons 查看管家从过去中学到的教训（RefleXion 教训库）
   /trust 管理工具信任白名单（默认允许某类工具，不再每次询问）
   /whoami 查看 Alfred 的积累状态（记忆/教训/情景/笔记/框架）
@@ -60,7 +61,15 @@ from alfred.events import (
 from .agent import AlfredDeps, build_agent, chat_turn_stream
 from ._stream_render import StreamMarkdown
 from .config import load_config
-from .history import Session, delete_session, list_sessions
+from .history import (
+    Session,
+    SessionInfo,
+    delete_session,
+    get_title,
+    list_sessions,
+    session_preview,
+    set_title,
+)
 from .memory import longterm
 from .memory.blocks import MemoryBlocks
 from .memory.lessons import LessonsBlock
@@ -81,9 +90,13 @@ ALFRED_HELP_LINE = (
 )
 
 
-def _print_startup_banner(config: "Config", session_id: str, has_session: bool) -> None:
+def _print_startup_banner(
+    config: "Config", session_id: str, has_session: bool, title: str | None = None
+) -> None:
     """渲染类似 Kimi Code 的启动面板。Rich 自动处理宽度/对齐。"""
     session_text = session_id if has_session else "(will be created on your first message)"
+    if has_session and title:
+        session_text = f"{session_id}  ({title})"
 
     content = (
         f"\n"
@@ -222,14 +235,22 @@ def _handle_trust(arg: str) -> None:
         return
 
 
-def _resolve_session_ref(config, ref: str, listed: list[tuple[str, float, int]]) -> str | None:
-    """把 /load、/delete 的参数解析为会话 id：支持列表序号或 id 前缀。"""
+def _resolve_session_ref(config, ref: str, listed: list[SessionInfo]) -> str | None:
+    """把 /load、/delete 的参数解析为会话 id：列表序号 → id 前缀 → 标题子串。"""
     if ref.isdigit():
         idx = int(ref) - 1
-        return listed[idx][0] if 0 <= idx < len(listed) else None
-    for sid, _mtime, _count in list_sessions(config):
-        if sid.startswith(ref):
-            return sid
+        return listed[idx].id if 0 <= idx < len(listed) else None
+    sessions = list_sessions(config)
+    for info in sessions:
+        if info.id.startswith(ref):
+            return info.id
+    matches = [i for i in sessions if i.title and ref.lower() in i.title.lower()]
+    if len(matches) == 1:
+        return matches[0].id
+    if len(matches) > 1:
+        console.print(f"[yellow]「{ref}」匹配到多个会话，请用 id 消歧：[/yellow]")
+        for i in matches:
+            console.print(f"  {i.id}  {i.title}")
     return None
 
 
@@ -414,7 +435,10 @@ def chat(
     )
     logger = _setup_chat_logger(config, debug=debug)
 
-    _print_startup_banner(config, session.id, has_session=bool(session_id))
+    _print_startup_banner(
+        config, session.id, has_session=bool(session_id),
+        title=get_title(config, session.id) if session_id else None,
+    )
     logger.info("会话开始: %s, 模型: %s, debug: %s", session.id, config.models.chat, debug)
     _exit_probe = {"session": session, "turn": 0}
     _install_exit_probes(logger, _exit_probe)
@@ -447,7 +471,8 @@ def chat(
     turn_count = 0
     # 每隔 N 轮对话，在回复后提示用户考虑复盘（让巩固动作浮出水面）
     _CONSOLIDATE_REMINDER_EVERY = 10
-    listed_sessions: list[tuple[str, float, int]] = []
+    listed_sessions: list[SessionInfo] = []
+    _title_attempted: set[str] = set()  # 本次运行已触发过标题生成的会话
     while True:
         # 若启动时有到期定时任务，注入为"首条用户输入"自动处理
         if _initial_injection is not None:
@@ -526,14 +551,28 @@ def chat(
                 _show_lessons(config, arg)
             elif cmd == "/trust":
                 _handle_trust(arg)
+            elif cmd == "/title":
+                if not arg:
+                    current_title = get_title(config, session.id)
+                    console.print(
+                        f"当前会话标题：{current_title or '(未设置)'}"
+                        "（修改：/title <新标题>）"
+                    )
+                else:
+                    set_title(config, session.id, arg, auto=False)
+                    console.print(f"[green]已设置会话标题：{arg}[/green]")
+                    logger.info("设置会话标题: %s -> %s", session.id, arg)
             elif cmd == "/sessions":
                 listed_sessions = list_sessions(config)[:10]
                 if not listed_sessions:
                     console.print("[dim]还没有历史会话。[/dim]")
-                for i, (sid, mtime, n) in enumerate(listed_sessions, 1):
-                    current = "（当前）" if sid == session.id else ""
+                for i, info in enumerate(listed_sessions, 1):
+                    current = "（当前）" if info.id == session.id else ""
+                    display = info.title or session_preview(config, info.id) or "(空会话)"
                     console.print(
-                        f"  {i}. {sid}  {datetime.fromtimestamp(mtime):%m-%d %H:%M}  {n} 条消息{current}"
+                        f"  {i}. {display}  [dim]{info.id}[/dim]  "
+                        f"{datetime.fromtimestamp(info.mtime):%m-%d %H:%M}  "
+                        f"{info.msg_count} 条消息{current}"
                     )
             elif cmd == "/load":
                 if not arg:
@@ -547,8 +586,10 @@ def chat(
                     else:
                         session = Session(config, session_id=sid)
                         _exit_probe["session"] = session
+                        loaded_title = get_title(config, sid)
+                        title_part = f"（{loaded_title}）" if loaded_title else ""
                         console.print(
-                            f"[green]已加载会话 {sid}（{len(session.messages)} 条消息），继续之前的上下文。[/green]"
+                            f"[green]已加载会话 {sid}{title_part}（{len(session.messages)} 条消息），继续之前的上下文。[/green]"
                         )
                         logger.info("加载会话: %s", sid)
             elif cmd == "/delete":
@@ -705,6 +746,12 @@ def chat(
 
         # hot path 结束后，后台异步沉淀长期记忆
         longterm.add_async(config, user_input, reply)
+
+        # 首个无标题会话的首轮完成后，后台自动生成标题（手动标题优先，失败静默）
+        if session.id not in _title_attempted and get_title(config, session.id) is None:
+            _title_attempted.add(session.id)
+            from . import titles
+            titles.maybe_generate_title_async(config, session.id, user_input, reply)
 
         # 记录对话轮数，供 consolidate_state 判断是否自动触发
         from .memory import consolidate_state

@@ -215,6 +215,18 @@ def set_title(config: Config, session_id: str, title: str, auto: bool) -> None:
         _save_meta(config, meta)
 
 
+def set_title_if_absent(config: Config, session_id: str, title: str) -> bool:
+    """原子 check-and-set：会话已有标题时不写入。供自动概括使用。"""
+    with _meta_lock:
+        meta = _load_meta(config)
+        entry = meta.get(session_id)
+        if isinstance(entry, dict) and entry.get("title"):
+            return False
+        meta[session_id] = {"title": title, "auto": True, "updated_at": time.time()}
+        _save_meta(config, meta)
+        return True
+
+
 def get_title(config: Config, session_id: str) -> str | None:
     entry = _load_meta(config).get(session_id)
     if not isinstance(entry, dict):
