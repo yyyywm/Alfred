@@ -265,6 +265,61 @@ def _setup_chat_logger(config, debug: bool = False) -> logging.Logger:
     return logger
 
 
+_CRASH_FH = None  # faulthandler 文件句柄，必须活到进程结束，不能局部变量被 GC
+
+
+def _install_exit_probes(logger: logging.Logger, probe: dict) -> None:
+    """静默退出探针：chat 曾出现无任何日志的进程消失，这里布设判别陷阱。
+
+    下次退出后按日志判别死因：
+    - 有「会话结束」→ 正常退出路径（/exit 或 prompt 处 Ctrl+C/EOF）
+    - 有「atexit 触发」但无「会话结束」→ 解释器正常收尾却绕过主循环（疑似 SystemExit）
+    - 有「未捕获异常」→ 主线程或后台线程异常逃逸
+    - data/logs/alfred_crash.log 非空 → 原生崩溃（段错误/访问违例）
+    - 以上全无 → 外部强杀（终端窗口被关、taskkill、断电等）
+    """
+    import atexit
+    import faulthandler
+    import threading as _threading
+
+    global _CRASH_FH
+    if _CRASH_FH is None:
+        base = next(
+            (getattr(h, "baseFilename", None) for h in logger.handlers
+             if getattr(h, "baseFilename", None)),
+            None,
+        )
+        if base:
+            crash_path = Path(base).with_name("alfred_crash.log")
+            _CRASH_FH = open(crash_path, "a", encoding="utf-8")
+            faulthandler.enable(file=_CRASH_FH)
+
+    default_hook = sys.excepthook
+
+    def _log_excepthook(exc_type, exc, tb):
+        logger.error("未捕获异常导致进程退出", exc_info=(exc_type, exc, tb))
+        default_hook(exc_type, exc, tb)
+
+    sys.excepthook = _log_excepthook
+
+    def _log_thread_excepthook(args):
+        logger.error(
+            "后台线程未捕获异常: %s",
+            args.thread.name if args.thread else "?",
+            exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+        )
+
+    _threading.excepthook = _log_thread_excepthook
+
+    def _on_exit():
+        logger.info(
+            "atexit 触发（解释器正常收尾）: session=%s, turn=%s",
+            getattr(probe.get("session"), "id", "?"), probe.get("turn"),
+        )
+
+    atexit.register(_on_exit)
+
+
 def _print_connection_result(ref: str, result: dict) -> None:
     if result["ok"]:
         console.print(f"  [green]✓[/green]  {ref}  {result['latency_ms']:.0f}ms")
@@ -361,6 +416,8 @@ def chat(
 
     _print_startup_banner(config, session.id, has_session=bool(session_id))
     logger.info("会话开始: %s, 模型: %s, debug: %s", session.id, config.models.chat, debug)
+    _exit_probe = {"session": session, "turn": 0}
+    _install_exit_probes(logger, _exit_probe)
 
     # 检查是否有历史 session 遗留的到期定时任务（未在当前 session 触发过），
     # 如果有，以首条用户输入的形式让 agent 主动处理
@@ -431,6 +488,7 @@ def chat(
                 console.print(__doc__)
             elif cmd == "/new":
                 session = Session(config)
+                _exit_probe["session"] = session
                 # 信任白名单声明为"会话内有效"，/new 后回到手动确认
                 _ConfirmState.trusted_tools.clear()
                 console.print(f"[dim]新会话 {session.id}[/dim]")
@@ -488,6 +546,7 @@ def chat(
                         console.print("[dim]当前已经在该会话。[/dim]")
                     else:
                         session = Session(config, session_id=sid)
+                        _exit_probe["session"] = session
                         console.print(
                             f"[green]已加载会话 {sid}（{len(session.messages)} 条消息），继续之前的上下文。[/green]"
                         )
@@ -538,6 +597,7 @@ def chat(
         # 分隔用户输入与助手输出
         console.print()
         turn_count += 1
+        _exit_probe["turn"] = turn_count
         logger.info("第 %d 轮输入，长度: %d", turn_count, len(user_input))
 
         reply_parts: list[str] = []          # 整轮全部文本，供记忆沉淀

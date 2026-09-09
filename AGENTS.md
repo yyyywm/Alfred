@@ -182,6 +182,7 @@ Alfred/
 - `chat` 交互使用 `prompt_toolkit.PromptSession`：支持行编辑（光标移动、删除、历史）、长输入；发送后显示 `助手正在思考...` spinner，收到首个事件后切换为 `助手：` 前缀；工具调用单独成行显示
 - 所有 Rich Console 输出集中在主线程渲染，避免与后台 agent 线程竞争；用户确认回调 `_confirm` 用原生 `print/input` 实现以降低线程安全风险
 - chat 日志通过 `_setup_chat_logger` 写入 `data/logs/alfred.log`（RotatingFileHandler，5MB×3），`--debug` 时同时输出到控制台；记录会话开始/结束、每轮输入/回复长度、工具调用、异常堆栈
+- 静默退出探针（`_install_exit_probes`）：chat 启动时布设 `atexit` + `sys.excepthook` + `threading.excepthook` + `faulthandler`（写 `data/logs/alfred_crash.log`）。排查"进程无声消失"时按日志判别：有「会话结束」=正常退出；有「atexit 触发」无「会话结束」=绕过主循环的干净收尾（疑似 SystemExit）；有「未捕获异常」=异常逃逸；`alfred_crash.log` 非空=原生崩溃；全无=外部强杀（终端被关/taskkill）
 - `/status`：在对话内检查当前 chat 模型与 embedding 的连接状态
 - `/lessons`：查看 RefleXion 教训库，支持按类别过滤（如 `/lessons code-debug`）
 
