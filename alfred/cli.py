@@ -623,11 +623,18 @@ def chat(
             stop_status()
             close_stream()  # 异常/中断时把半截正文也落定，别丢
             if isinstance(e, KeyboardInterrupt):
-                console.print("\n[dim]已中断。[/dim]")
                 logger.info("用户中断第 %d 轮", turn_count)
             else:
-                console.print(f"\n[red]出错了：{e}[/red]")
+                # 先落日志再打印：stdout 若已损坏（如被关闭的流替换），
+                # console.print 自身会抛 ValueError，原始异常不能跟着丢
                 logger.error("第 %d 轮异常: %s", turn_count, e, exc_info=True)
+            try:
+                if isinstance(e, KeyboardInterrupt):
+                    console.print("\n[dim]已中断。[/dim]")
+                else:
+                    console.print(f"\n[red]出错了：{e}[/red]")
+            except ValueError:
+                pass
             continue
         finally:
             stop_status()

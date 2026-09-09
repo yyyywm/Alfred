@@ -22,6 +22,11 @@ _user_clients: dict[str, MemoryClient] = {}
 _provider = "local"
 _init_failed = False
 
+# redirect_stdout 换的是进程全局 sys.stdout：两个写入线程重叠时，后退出者
+# 会把 sys.stdout 恢复成对方已关闭的 devnull，主线程下一次 print 即
+# ValueError（chat 静默退出、退出码 1 的根因）。加锁串行化写入窗口。
+_add_lock = threading.Lock()
+
 
 def _select_provider(config: Config) -> str:
     global _provider
@@ -145,21 +150,22 @@ def add_async(
         client = get_client(config, user_id)
         if client is None:
             return
-        with open(os.devnull, "w") as devnull:
-            with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
-                try:
-                    client.add(
-                        [
-                            {"role": "user", "content": user_msg},
-                            {"role": "assistant", "content": assistant_msg},
-                        ],
-                        user_id=user_id or config.memory.default_user_id,
-                        metadata=metadata,
-                    )
-                except Exception:
-                    logging.getLogger(__name__).warning(
-                        "mem0 记忆写入失败（用户消息: %s）", user_msg[:80]
-                    )
+        with _add_lock:
+            with open(os.devnull, "w") as devnull:
+                with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+                    try:
+                        client.add(
+                            [
+                                {"role": "user", "content": user_msg},
+                                {"role": "assistant", "content": assistant_msg},
+                            ],
+                            user_id=user_id or config.memory.default_user_id,
+                            metadata=metadata,
+                        )
+                    except Exception:
+                        logging.getLogger(__name__).warning(
+                            "mem0 记忆写入失败（用户消息: %s）", user_msg[:80]
+                        )
 
     threading.Thread(target=_run, daemon=True).start()
 

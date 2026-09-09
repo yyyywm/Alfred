@@ -206,3 +206,62 @@ def test_delete_checks_tenant_ownership(tmp_path):
     # 没有 user_id 字段的旧数据无法判断归属，保持可删（向后兼容）
     client._mem.store = {"old": {"id": "old", "memory": "无租户字段的旧记录"}}
     assert client.delete("old") is True
+
+
+def test_add_async_concurrent_never_leaves_stdout_closed(monkeypatch):
+    """回归：add_async 后台线程用 redirect_stdout 换进程全局 sys.stdout，
+    两个写入线程重叠时，后退出者会把 sys.stdout 恢复成对方已关闭的 devnull，
+    主线程下一次 print 即 ValueError——chat 静默退出（退出码 1）的根因。
+    修复后写入窗口加锁串行，sys.stdout/stderr 必须保持为原始未关闭对象。
+    """
+    import sys
+    import threading
+    import time
+
+    barrier = threading.Barrier(2)
+
+    class SlowClient:
+        def __init__(self):
+            self.calls = 0
+            self._lock = threading.Lock()
+
+        def add(self, messages, user_id=None, metadata=None):
+            with self._lock:
+                self.calls += 1
+                n = self.calls
+            try:
+                # 让两个线程同时处于 redirect 窗口内（修复后锁使第二个线程
+                # 排在窗口外，barrier 1s 超时破裂，测试照常推进）
+                barrier.wait(timeout=1)
+            except threading.BrokenBarrierError:
+                pass
+            if n == 2:
+                # 保证 n==1 的线程先退出窗口：无锁旧实现下，先退出者 restore+close
+                # 后，后退出者把 sys.stdout 恢复成对方已关闭的 devnull
+                time.sleep(0.2)
+
+    client = SlowClient()
+    monkeypatch.setattr(longterm, "get_client", lambda *a, **k: client)
+
+    real_thread = threading.Thread
+    spawned = []
+
+    def spy_thread(*args, **kwargs):
+        t = real_thread(*args, **kwargs)
+        spawned.append(t)
+        return t
+
+    monkeypatch.setattr(longterm.threading, "Thread", spy_thread)
+
+    orig_out, orig_err = sys.stdout, sys.stderr
+    cfg = Config(memory={"default_user_id": "owner"})
+    user_msg = "这是一条足够长的测试用户消息，不会被琐碎消息过滤器跳过。"
+    asst_msg = "这是一条足够长的测试助手回复，也不会被琐碎消息过滤器跳过。"
+    longterm.add_async(cfg, user_msg, asst_msg)
+    longterm.add_async(cfg, user_msg, asst_msg)
+    for t in spawned:
+        t.join(timeout=10)
+
+    assert len(spawned) == 2
+    assert sys.stdout is orig_out and not sys.stdout.closed
+    assert sys.stderr is orig_err and not sys.stderr.closed
