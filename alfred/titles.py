@@ -15,7 +15,9 @@ import threading
 from .config import Config
 from .history import set_title_if_absent
 
-logger = logging.getLogger(__name__)
+# chat 场景下 _setup_chat_logger 已给 "alfred.chat" 挂 RotatingFileHandler，
+# 子 logger 记录进 alfred.log 文件而不碰终端；非 chat 场景回退 lastResort。
+logger = logging.getLogger("alfred.chat.titles")
 
 MAX_TITLE_CHARS = 30
 
@@ -53,6 +55,8 @@ def generate_title(config: Config, user_text: str, assistant_text: str) -> str |
         )
         # pydantic-ai 新版为 result.output，旧版为 result.data
         raw = getattr(result, "output", None) or getattr(result, "data", None)
+        if not raw:
+            return None
         return _clean_title(raw)
     except Exception as e:
         logger.warning("自动生成会话标题失败: %s", e)

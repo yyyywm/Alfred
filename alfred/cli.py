@@ -60,6 +60,7 @@ from alfred.events import (
 
 from .agent import AlfredDeps, build_agent, chat_turn_stream
 from ._stream_render import StreamMarkdown
+from . import titles
 from .config import load_config
 from .history import (
     Session,
@@ -239,7 +240,10 @@ def _resolve_session_ref(config, ref: str, listed: list[SessionInfo]) -> str | N
     """把 /load、/delete 的参数解析为会话 id：列表序号 → id 前缀 → 标题子串。"""
     if ref.isdigit():
         idx = int(ref) - 1
-        return listed[idx].id if 0 <= idx < len(listed) else None
+        if 0 <= idx < len(listed):
+            return listed[idx].id
+        console.print(f"[red]找不到会话：{ref}[/red]")
+        return None
     sessions = list_sessions(config)
     for info in sessions:
         if info.id.startswith(ref):
@@ -251,6 +255,8 @@ def _resolve_session_ref(config, ref: str, listed: list[SessionInfo]) -> str | N
         console.print(f"[yellow]「{ref}」匹配到多个会话，请用 id 消歧：[/yellow]")
         for i in matches:
             console.print(f"  {i.id}  {i.title}")
+        return None
+    console.print(f"[red]找不到会话：{ref}[/red]")
     return None
 
 
@@ -474,6 +480,8 @@ def chat(
     listed_sessions: list[SessionInfo] = []
     _title_attempted: set[str] = set()  # 本次运行已触发过标题生成的会话
     while True:
+        # 本轮标题来源（去掉系统注入的原始用户输入）；定时任务注入轮跳过自动标题
+        raw_user_input: str | None = None
         # 若启动时有到期定时任务，注入为"首条用户输入"自动处理
         if _initial_injection is not None:
             user_input = _initial_injection
@@ -486,6 +494,7 @@ def chat(
                 break
             if not user_input:
                 continue
+            raw_user_input = user_input
 
         if user_input.startswith("/"):
             cmd, _, arg = user_input.partition(" ")
@@ -559,9 +568,14 @@ def chat(
                         "（修改：/title <新标题>）"
                     )
                 else:
-                    set_title(config, session.id, arg, auto=False)
-                    console.print(f"[green]已设置会话标题：{arg}[/green]")
-                    logger.info("设置会话标题: %s -> %s", session.id, arg)
+                    title = arg[: titles.MAX_TITLE_CHARS]
+                    if len(arg) > titles.MAX_TITLE_CHARS:
+                        console.print(
+                            f"[yellow]标题超长，已截断到 {titles.MAX_TITLE_CHARS} 字符。[/yellow]"
+                        )
+                    set_title(config, session.id, title, auto=False)
+                    console.print(f"[green]已设置会话标题：{title}[/green]")
+                    logger.info("设置会话标题: %s -> %s", session.id, title)
             elif cmd == "/sessions":
                 listed_sessions = list_sessions(config)[:10]
                 if not listed_sessions:
@@ -576,11 +590,11 @@ def chat(
                     )
             elif cmd == "/load":
                 if not arg:
-                    console.print("用法：/load <序号或会话id>（序号见 /sessions）")
+                    console.print("用法：/load <序号|id|标题关键词>（序号见 /sessions）")
                 else:
                     sid = _resolve_session_ref(config, arg, listed_sessions)
                     if sid is None:
-                        console.print(f"[red]找不到会话：{arg}[/red]")
+                        continue
                     elif sid == session.id:
                         console.print("[dim]当前已经在该会话。[/dim]")
                     else:
@@ -594,11 +608,11 @@ def chat(
                         logger.info("加载会话: %s", sid)
             elif cmd == "/delete":
                 if not arg:
-                    console.print("用法：/delete <序号或会话id>（序号见 /sessions）")
+                    console.print("用法：/delete <序号|id|标题关键词>（序号见 /sessions）")
                 else:
                     sid = _resolve_session_ref(config, arg, listed_sessions)
                     if sid is None:
-                        console.print(f"[red]找不到会话：{arg}[/red]")
+                        continue
                     elif sid == session.id:
                         console.print("[red]不能删除当前会话。[/red]")
                     elif _confirm(f"删除会话 {sid}？该操作不可恢复。"):
@@ -748,10 +762,14 @@ def chat(
         longterm.add_async(config, user_input, reply)
 
         # 首个无标题会话的首轮完成后，后台自动生成标题（手动标题优先，失败静默）
-        if session.id not in _title_attempted and get_title(config, session.id) is None:
+        # 标题来源用 raw_user_input（剥离定时任务系统注入）；定时任务注入轮不生成
+        if (
+            raw_user_input is not None
+            and session.id not in _title_attempted
+            and get_title(config, session.id) is None
+        ):
             _title_attempted.add(session.id)
-            from . import titles
-            titles.maybe_generate_title_async(config, session.id, user_input, reply)
+            titles.maybe_generate_title_async(config, session.id, raw_user_input, reply)
 
         # 记录对话轮数，供 consolidate_state 判断是否自动触发
         from .memory import consolidate_state
