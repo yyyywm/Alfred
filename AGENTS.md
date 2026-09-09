@@ -93,7 +93,8 @@ Alfred/
 │   ├── llm.py              # provider:model → pydantic-ai model 实例
 │   ├── agent.py            # agent 内核：四层 prompt + 恒定工具集
 │   ├── events.py           # 事件总线： TurnStart/AssistantChunk/ToolCall*/TurnEnd 等
-│   ├── history.py          # 会话历史 JSONL 归一化持久化
+│   ├── history.py          # 会话历史 JSONL 归一化持久化 + 会话标题元数据（sessions_meta.json）
+│   ├── titles.py           # 自动会话标题：首轮后后台概括（≤15 字）
 │   ├── compaction.py       # 上下文压缩：丢内容留指针 + 偏好优先
 │   ├── codewriting.py      # 自举进化：code_patch 三重门禁（路径/语法/测试）
 │   │
@@ -177,7 +178,7 @@ Alfred/
 
 ### CLI（`alfred/cli.py`）
 - 所有用户命令入口：`chat`、`ingest`、`feed`、`frameworks`、`consolidate`、`memory`、`skills`、`models`
-- `chat` 内支持斜杠命令：`/exit`、`/new`、`/model`、`/remember`、`/memory`、`/why`、`/sessions`、`/load`、`/delete`、`/lessons`、`/status`、`/whoami`、`/trust`、`/consolidate`、`/consolidate-review`、`/audit`、`/help`
+- `chat` 内支持斜杠命令：`/exit`、`/new`、`/model`、`/remember`、`/memory`、`/why`、`/sessions`、`/load`、`/delete`、`/title`、`/lessons`、`/status`、`/whoami`、`/trust`、`/consolidate`、`/consolidate-review`、`/audit`、`/help`
 - `chat` 启动选项：`--session/-s` 恢复会话、`--debug` 启用调试日志输出到控制台
 - `chat` 交互使用 `prompt_toolkit.PromptSession`：支持行编辑（光标移动、删除、历史）、长输入；发送后显示 `助手正在思考...` spinner，收到首个事件后切换为 `助手：` 前缀；工具调用单独成行显示
 - 所有 Rich Console 输出集中在主线程渲染，避免与后台 agent 线程竞争；用户确认回调 `_confirm` 用原生 `print/input` 实现以降低线程安全风险
@@ -214,6 +215,12 @@ Alfred/
 - `shell`：执行 shell 命令（需用户确认）
 - `run_python`：执行 Python 代码（需用户确认）
 - `code_patch`：自举进化工具，精确替换源代码中的一段文本（需用户确认，三重门禁，单轮最多一次）
+
+### 会话历史（`alfred/history.py`）
+- `SessionInfo`：会话元信息 dataclass（id / mtime / msg_count / title / title_auto）；`list_sessions` 返回 `list[SessionInfo]`（不再是 3 元组）
+- 标题元数据存 `data/history/sessions_meta.json`（id → {title, auto, updated_at}），原子写入（tmp + `os.replace`），文件损坏降级为空表；`.json` 后缀，`list_sessions` 的 `*.jsonl` glob 天然不匹配，无需进排除清单
+- 标题操作：`set_title` / `get_title` / `set_title_if_absent`（原子 check-and-set，`_meta_lock` 串行保护，已有标题不覆盖）；`session_preview` 取首条用户消息截断作无标题会话的回退显示（只读不写回）；`delete_session` 同步清理 meta
+- 自动标题（`titles.py`）：首轮对话完成后后台 daemon 线程用 `models.chat` 概括 ≤15 字标题；`write_auto_title` 走 `set_title_if_absent`，已有标题（含自动标题）永不被覆盖；失败静默记日志（logger 名 `alfred.chat.titles`，进 alfred.log 不碰终端）；定时任务注入轮不生成标题（用注入前原始输入）
 
 ### 自举进化（`alfred/codewriting.py`）
 
@@ -260,6 +267,7 @@ Alfred/
 - **启动注入**：chat 启动时若有历史遗留到期任务，作为首条"用户输入"自动处理，agent 无需用户主动开口
 - **跨 session 全局可见**：schedule 数据存全局 JSONL，不绑定 session，换 session / 重启不丢
 - **save_episode 工具**：agent 成功完成任务后主动调用，把经验沉淀为情景记忆四元组（配合 consolidate 自动萃取形成闭环）
+- **自动会话标题**：首轮对话完成后 `titles.py` 后台 daemon 线程用 `models.chat` 概括 ≤15 字标题，已有标题（含自动标题）永不覆盖；`/title` 手动设置优先，定时任务注入轮不生成标题
 
 ### 知识层（`alfred/knowledge/`）
 - `chunking.py`：按 Markdown 标题层级切分，保留标题路径前缀，解析 frontmatter
@@ -365,7 +373,8 @@ data/
 │   ├── persona.md
 │   └── lessons.md          # RefleXion 教训库
 ├── history/
-│   └── <session_id>.jsonl  # 归一化消息 + llm_state 记录
+│   ├── <session_id>.jsonl  # 归一化消息 + llm_state 记录
+│   └── sessions_meta.json  # 会话标题元数据（id → title/auto/updated_at）
 ├── logs/
 │   └── alfred.log          # 对话日志（5MB 轮转 ×3）
 └── vectordb/
@@ -386,6 +395,7 @@ data/
 - **Rich Console 与后台线程混用会导致输出错乱或卡死**：`chat` 的渲染必须在主线程完成，事件监听只做数据传递，不直接操作 Console。
 - **mem0 后台写入可能污染终端**：`longterm.add_async` 的后台线程内用 `contextlib.redirect_stdout/stderr` 屏蔽所有输出，防止 mem0 或依赖库意外打印内容干扰 prompt_toolkit 输入。**redirect 窗口必须持有 `_add_lock`**：redirect 换的是进程全局 sys.stdout，两个写入线程重叠时后退出者会把 sys.stdout 恢复成对方已关闭的 devnull，主线程下一次 print 即 `ValueError: I/O operation on closed file`——这曾是 chat 多轮后"静默退出"（退出码 1、stderr 同样被换走导致连 traceback 都打不出）的根因。
 - **Windows asyncio Ctrl+C 报错**：`cli.py` 中已设置 `WindowsSelectorEventLoopPolicy()`，避免 prompt-toolkit 在 Ctrl+C 时报 "Cancelling an overlapped future failed"。
+- **手动标题永不被自动概括覆盖**：自动标题走 `set_title_if_absent`（`_meta_lock` 保护的原子 check-and-set），已有标题（含自动标题）一律不覆盖；自动生成失败静默降级，记 `alfred.chat.titles` logger 进 alfred.log，不碰终端、不阻塞对话。
 
 ## 部署与分发
 
