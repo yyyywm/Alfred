@@ -72,6 +72,21 @@ def test_corrupt_meta_list_sessions_title_none(tmp_path):
     assert info.title is None
 
 
+def test_malformed_meta_entry_degrades(tmp_path):
+    """meta 条目不是 dict（手改损坏）时，get_title/list_sessions 不崩。"""
+    import json
+    from alfred.history import list_sessions
+    cfg = _cfg(tmp_path)
+    s = Session(cfg)
+    s.add_user("内容")
+    meta_file = cfg.path(cfg.paths.history_dir) / "sessions_meta.json"
+    meta_file.write_text(json.dumps({s.id: "oops-not-a-dict"}), encoding="utf-8")
+    assert get_title(cfg, s.id) is None
+    (info,) = list_sessions(cfg)
+    assert info.title is None
+    assert info.title_auto is True
+
+
 def test_session_preview_fallback(tmp_path):
     from alfred.history import session_preview
     cfg = _cfg(tmp_path)

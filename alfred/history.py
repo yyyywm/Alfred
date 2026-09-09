@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -163,7 +164,9 @@ def list_sessions(config: Config) -> list[SessionInfo]:
         for line in f.read_text(encoding="utf-8").splitlines():
             if line.strip() and '"type": "llm_state"' not in line:
                 count += 1
-        entry = meta.get(f.stem) or {}
+        entry = meta.get(f.stem)
+        if not isinstance(entry, dict):
+            entry = {}
         rows.append(SessionInfo(
             id=f.stem,
             mtime=f.stat().st_mtime,
@@ -175,6 +178,8 @@ def list_sessions(config: Config) -> list[SessionInfo]:
 
 
 SESSIONS_META_FILE = "sessions_meta.json"
+
+_meta_lock = threading.Lock()  # meta 的 load→mutate→save 必须整体串行（后台线程也会写）
 
 
 def _meta_path(config: Config) -> Path:
@@ -196,6 +201,7 @@ def _load_meta(config: Config) -> dict:
 
 def _save_meta(config: Config, meta: dict) -> None:
     f = _meta_path(config)
+    f.parent.mkdir(parents=True, exist_ok=True)
     tmp = f.with_suffix(".tmp")
     tmp.write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(tmp, f)
@@ -203,14 +209,17 @@ def _save_meta(config: Config, meta: dict) -> None:
 
 def set_title(config: Config, session_id: str, title: str, auto: bool) -> None:
     """设置会话标题。auto=True 表示自动概括，False 表示用户手动设置。"""
-    meta = _load_meta(config)
-    meta[session_id] = {"title": title, "auto": auto, "updated_at": time.time()}
-    _save_meta(config, meta)
+    with _meta_lock:
+        meta = _load_meta(config)
+        meta[session_id] = {"title": title, "auto": auto, "updated_at": time.time()}
+        _save_meta(config, meta)
 
 
 def get_title(config: Config, session_id: str) -> str | None:
     entry = _load_meta(config).get(session_id)
-    return entry["title"] if entry else None
+    if not isinstance(entry, dict):
+        return None
+    return entry.get("title")
 
 
 def delete_session(config: Config, session_id: str) -> bool:
@@ -220,10 +229,11 @@ def delete_session(config: Config, session_id: str) -> bool:
     if not f.exists():
         return False
     f.unlink()
-    meta = _load_meta(config)
-    if safe_id in meta:
-        del meta[safe_id]
-        _save_meta(config, meta)
+    with _meta_lock:
+        meta = _load_meta(config)
+        if safe_id in meta:
+            del meta[safe_id]
+            _save_meta(config, meta)
     return True
 
 
