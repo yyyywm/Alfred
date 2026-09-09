@@ -72,6 +72,35 @@ def test_corrupt_meta_list_sessions_title_none(tmp_path):
     assert info.title is None
 
 
+def test_clean_title():
+    from alfred.titles import _clean_title
+    assert _clean_title("记账软件选型") == "记账软件选型"
+    assert _clean_title('  "记账软件选型"。\n多余行') == "记账软件选型"
+    assert _clean_title("「读书计划」") == "读书计划"
+    assert _clean_title("") is None
+    assert _clean_title("   \n  ") is None
+    assert len(_clean_title("一" * 50)) == 30  # 超长截断
+
+
+def test_auto_title_never_overrides(tmp_path):
+    from alfred.titles import write_auto_title
+    cfg = _cfg(tmp_path)
+    # 手动标题优先：自动概括不得覆盖
+    s = Session(cfg)
+    s.add_user("内容")
+    set_title(cfg, s.id, "手动标题", auto=False)
+    assert write_auto_title(cfg, s.id, "自动标题") is False
+    assert get_title(cfg, s.id) == "手动标题"
+    # 无标题时可以写入
+    s2 = Session(cfg)
+    s2.add_user("另一个会话")
+    assert write_auto_title(cfg, s2.id, "自动标题") is True
+    assert get_title(cfg, s2.id) == "自动标题"
+    # 已有自动标题也不再重复覆盖
+    assert write_auto_title(cfg, s2.id, "又来一个") is False
+    assert get_title(cfg, s2.id) == "自动标题"
+
+
 def test_malformed_meta_entry_degrades(tmp_path):
     """meta 条目不是 dict（手改损坏）时，get_title/list_sessions 不崩。"""
     import json
