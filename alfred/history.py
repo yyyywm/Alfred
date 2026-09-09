@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -152,11 +154,54 @@ def list_sessions(config: Config) -> list[tuple[str, float, int]]:
     return sorted(rows, key=lambda r: r[1], reverse=True)
 
 
+SESSIONS_META_FILE = "sessions_meta.json"
+
+
+def _meta_path(config: Config) -> Path:
+    return config.path(config.paths.history_dir) / SESSIONS_META_FILE
+
+
+def _load_meta(config: Config) -> dict:
+    """读 sessions_meta.json；文件损坏按空表处理，不影响会话功能。"""
+    f = _meta_path(config)
+    if not f.exists():
+        return {}
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError) as e:
+        logging.getLogger(__name__).warning("sessions_meta.json 损坏，按空表处理: %s", e)
+        return {}
+
+
+def _save_meta(config: Config, meta: dict) -> None:
+    f = _meta_path(config)
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, f)
+
+
+def set_title(config: Config, session_id: str, title: str, auto: bool) -> None:
+    """设置会话标题。auto=True 表示自动概括，False 表示用户手动设置。"""
+    meta = _load_meta(config)
+    meta[session_id] = {"title": title, "auto": auto, "updated_at": time.time()}
+    _save_meta(config, meta)
+
+
+def get_title(config: Config, session_id: str) -> str | None:
+    entry = _load_meta(config).get(session_id)
+    return entry["title"] if entry else None
+
+
 def delete_session(config: Config, session_id: str) -> bool:
-    """删除指定会话的历史文件。返回是否删除成功。"""
+    """删除指定会话的历史文件与标题元数据。返回是否删除成功。"""
     safe_id = Path(session_id).name  # 防路径穿越
     f = config.path(config.paths.history_dir) / f"{safe_id}.jsonl"
-    if f.exists():
-        f.unlink()
-        return True
-    return False
+    if not f.exists():
+        return False
+    f.unlink()
+    meta = _load_meta(config)
+    if safe_id in meta:
+        del meta[safe_id]
+        _save_meta(config, meta)
+    return True
