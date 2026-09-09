@@ -109,11 +109,11 @@ def _scan_sessions(config, cutoff: float = 0.0) -> tuple[Counter, int, int, int]
     success = 0
     error = 0
 
-    for sid, mtime, _count in list_sessions(config):
-        if cutoff and mtime < cutoff:
+    for info in list_sessions(config):
+        if cutoff and info.mtime < cutoff:
             continue
         try:
-            s = Session(config, session_id=sid)
+            s = Session(config, session_id=info.id)
         except Exception:
             continue
         for msg in s.messages:
@@ -148,11 +148,11 @@ def audit(config, days: int = 90) -> MemoryAuditReport:
     # ① 会话与消息统计
     sessions = list_sessions(config)
     report.total_sessions = len(sessions)
-    report.total_messages = sum(n for _sid, _mt, n in sessions)
+    report.total_messages = sum(i.msg_count for i in sessions)
 
     # 过滤到 days 范围内的会话，统计轮数
-    recent_sessions = [(sid, mt, n) for sid, mt, n in sessions if mt >= cutoff]
-    report.total_turns = sum(n for _sid, _mt, n in recent_sessions)
+    recent_sessions = [i for i in sessions if i.mtime >= cutoff]
+    report.total_turns = sum(i.msg_count for i in recent_sessions)
 
     # ② 长期记忆
     try:
@@ -186,9 +186,9 @@ def audit(config, days: int = 90) -> MemoryAuditReport:
         report.rules_count = len(rules)
         # 粗粒度：检查规则是否有被 agent 提及（从历史中搜 rule name）
         rule_names = {r.name for r in rules}
-        for sid, _mt, _n in sessions[:50]:
+        for i in sessions[:50]:
             try:
-                s = Session(config, session_id=sid)
+                s = Session(config, session_id=i.id)
                 text = s.transcript()
                 for rn in rule_names:
                     if rn in text:
@@ -213,9 +213,9 @@ def audit(config, days: int = 90) -> MemoryAuditReport:
             notes = db.open_table("notes").to_list()
             all_sources = {r.get("source") for r in notes if r.get("source")}
             referenced: set[str] = set()
-            for sid, _mt, _n in sessions[:100]:
+            for i in sessions[:100]:
                 try:
-                    s = Session(config, session_id=sid)
+                    s = Session(config, session_id=i.id)
                     t = s.transcript()
                     for src in all_sources:
                         if src in t:

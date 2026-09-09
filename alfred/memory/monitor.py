@@ -41,15 +41,15 @@ def collect_metrics(config, days: int = 90) -> dict:
     skill_dir = config.path(config.paths.skills_dirs[0]) if config.paths.skills_dirs else None
     skill_dir_str = str(skill_dir).lower() if skill_dir else ""
 
-    for sid, mtime, _count in list_sessions(config):
-        if mtime < cutoff:
+    for info in list_sessions(config):
+        if info.mtime < cutoff:
             continue
         try:
-            s = Session(config, session_id=sid)
+            s = Session(config, session_id=info.id)
         except Exception:
             continue
 
-        day_key = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d")
+        day_key = datetime.fromtimestamp(info.mtime).strftime("%Y-%m-%d")
         daily_sessions[day_key] += 1
         daily_turns[day_key] += len(s.messages)
 

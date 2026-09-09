@@ -67,6 +67,17 @@ def _message_from_record(record: dict) -> Message:
     return Message(tool_calls=tool_calls, **record)
 
 
+@dataclass
+class SessionInfo:
+    """list_sessions 返回的会话摘要（含标题元数据）。"""
+
+    id: str
+    mtime: float
+    msg_count: int
+    title: str | None = None       # None = 未设置标题
+    title_auto: bool = True        # True=自动概括，False=用户手动设置
+
+
 class Session:
     """一个会话 = 一个 JSONL 文件。append-only；压缩时整体重写。"""
 
@@ -132,16 +143,18 @@ class Session:
         return "\n".join(lines)
 
 
-def list_sessions(config: Config) -> list[tuple[str, float, int]]:
-    """返回 [(session_id, mtime, msg_count)]，按最近修改排序。
+def list_sessions(config: Config) -> list[SessionInfo]:
+    """返回会话摘要列表（含标题），按最近修改排序。
 
     排除非会话 JSONL（consolidate 元数据/待审草稿），否则会被下游当成
     会话历史解析而崩溃（drafts 字段不在 Message schema 内）。
+    sessions_meta.json 是 .json 后缀，*.jsonl glob 天然不匹配。
     """
     d = config.path(config.paths.history_dir)
     if not d.exists():
         return []
     meta_files = {"consolidate_state.jsonl", "consolidate_pending.jsonl"}
+    meta = _load_meta(config)
     rows = []
     for f in d.glob("*.jsonl"):
         if f.name in meta_files:
@@ -150,8 +163,15 @@ def list_sessions(config: Config) -> list[tuple[str, float, int]]:
         for line in f.read_text(encoding="utf-8").splitlines():
             if line.strip() and '"type": "llm_state"' not in line:
                 count += 1
-        rows.append((f.stem, f.stat().st_mtime, count))
-    return sorted(rows, key=lambda r: r[1], reverse=True)
+        entry = meta.get(f.stem) or {}
+        rows.append(SessionInfo(
+            id=f.stem,
+            mtime=f.stat().st_mtime,
+            msg_count=count,
+            title=entry.get("title"),
+            title_auto=entry.get("auto", True),
+        ))
+    return sorted(rows, key=lambda r: r.mtime, reverse=True)
 
 
 SESSIONS_META_FILE = "sessions_meta.json"
@@ -205,3 +225,24 @@ def delete_session(config: Config, session_id: str) -> bool:
         del meta[safe_id]
         _save_meta(config, meta)
     return True
+
+
+def session_preview(config: Config, session_id: str, max_chars: int = 30) -> str | None:
+    """无标题会话的回退展示：首条用户消息截断（只读，不写回存储）。"""
+    safe_id = Path(session_id).name
+    f = config.path(config.paths.history_dir) / f"{safe_id}.jsonl"
+    if not f.exists():
+        return None
+    try:
+        for line in f.read_text(encoding="utf-8").splitlines():
+            if not line.strip() or '"type": "llm_state"' in line:
+                continue
+            record = json.loads(line)
+            if record.get("role") == "user":
+                text = record.get("content", "").strip().replace("\n", " ")
+                if not text:
+                    return None
+                return text[:max_chars] + "…" if len(text) > max_chars else text
+    except (json.JSONDecodeError, OSError):
+        return None
+    return None

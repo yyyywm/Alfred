@@ -150,9 +150,9 @@ def test_list_sessions_excludes_meta_files(tmp_path):
         )
 
     sessions = list_sessions(cfg)
-    ids = {sid for sid, _m, _n in sessions}
+    ids = {i.id for i in sessions}
     assert ids == {s.id}
     # 且 meta 文件不会导致下游解析崩溃
-    for sid, _m, _n in sessions:
-        sess = Session(cfg, session_id=sid)
+    for i in sessions:
+        sess = Session(cfg, session_id=i.id)
         assert len(sess.messages) == 1

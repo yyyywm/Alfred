@@ -126,13 +126,13 @@ def _recent_transcripts(config: Config, days: int = 3, max_sessions: int = 5) ->
     from ..history import Session
 
     cutoff = datetime.now().timestamp() - days * 86400
-    sessions = [s for s in list_sessions(config) if s[1] >= cutoff][:max_sessions]
+    sessions = [i for i in list_sessions(config) if i.mtime >= cutoff][:max_sessions]
     parts = []
-    for sid, _mtime, _n in sessions:
-        s = Session(config, session_id=sid)
+    for info in sessions:
+        s = Session(config, session_id=info.id)
         t = s.transcript()
         if t:
-            parts.append(f"=== 会话 {sid} ===\n{t}")
+            parts.append(f"=== 会话 {info.id} ===\n{t}")
     return "\n\n".join(parts)
 
 

@@ -9,6 +9,7 @@ import time
 from types import SimpleNamespace
 
 from alfred.config import Config
+from alfred.history import SessionInfo
 from alfred.memory import audit as audit_mod
 
 
@@ -25,8 +26,8 @@ def _assistant(*tool_calls):
 # 固定戳会让测试跑在 2001 年之后时全部出窗。
 _NOW = time.time()
 _ROWS = [
-    ("recent", _NOW - 86400, 1),
-    ("stale", _NOW - 30 * 86400, 1),
+    SessionInfo(id="recent", mtime=_NOW - 86400, msg_count=1),
+    SessionInfo(id="stale", mtime=_NOW - 30 * 86400, msg_count=1),
 ]
 _MESSAGES = {
     "recent": [_assistant(("file_read", False), ("file_read", True))],
