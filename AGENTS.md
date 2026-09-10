@@ -393,7 +393,8 @@ data/
 - **聊天内切换模型会重建 agent**：`/model provider:model` 会调用 `build_agent(config, arg)`，历史消息以归一化 transcript 做种子上下文。
 - **`alfred` 命令报 `ModuleNotFoundError`**：说明当前 Python 环境没有安装 alfred 包，或安装时指向了其他目录。先 `pip uninstall alfred`，再到项目根目录执行 `pip install -e ".[dev]"`。
 - **Rich Console 与后台线程混用会导致输出错乱或卡死**：`chat` 的渲染必须在主线程完成，事件监听只做数据传递，不直接操作 Console。
-- **mem0 后台写入可能污染终端**：`longterm.add_async` 的后台线程内用 `contextlib.redirect_stdout/stderr` 屏蔽所有输出，防止 mem0 或依赖库意外打印内容干扰 prompt_toolkit 输入。**redirect 窗口必须持有 `_add_lock`**：redirect 换的是进程全局 sys.stdout，两个写入线程重叠时后退出者会把 sys.stdout 恢复成对方已关闭的 devnull，主线程下一次 print 即 `ValueError: I/O operation on closed file`——这曾是 chat 多轮后"静默退出"（退出码 1、stderr 同样被换走导致连 traceback 都打不出）的根因。
+- **mem0 后台写入可能污染终端**：`longterm.add_async` 的后台线程内用 `contextlib.redirect_stdout/stderr` 屏蔽所有输出，防止 mem0 或依赖库意外打印内容干扰 prompt_toolkit 输入。**redirect 窗口必须持有 `_add_lock`**：redirect 换的是进程全局 sys.stdout，两个写入线程重叠时后退出者会把 sys.stdout 恢复成对方已关闭的 devnull，主线程下一次 print 即 `ValueError: I/O operation on closed file`——这曾是 chat 多轮后"静默退出"（退出码 1、stderr 同样被换走导致连 traceback 都打不出）的根因。devnull 必须 `encoding="utf-8", errors="replace"` 打开，否则窗口内其他线程（如 spinner 刷新）写入 braille 字符会 GBK 编码崩溃。
+- **Rich Live 的流重定向与 devnull 窗口交错会救回已关闭的 devnull**：`console.status()`/Live 在 start() 时把 sys.stdout 存为"原流"并换成内部 FileProxy，stop() 无条件装回。mem0 redirect 窗口可持续数十秒：status 在窗口内 start → Live 保存的"原流"是 devnull → 窗口退出关闭 devnull → stop() 把已关闭的 devnull 装回 sys.stdout → 主线程 console.print 崩 `ValueError: I/O operation on closed file`（2026-09-10 chat 崩溃根因）。**所有 status 必须经 `cli.py` 的 `_make_status()` 构造**（禁用 Live 的流重定向；注意 rich>=14 的 `Status` 组合了内部 `Live`，标志要设在 `status._live` 上）。回归测试：`tests/test_status_io_race.py`。
 - **Windows asyncio Ctrl+C 报错**：`cli.py` 中已设置 `WindowsSelectorEventLoopPolicy()`，避免 prompt-toolkit 在 Ctrl+C 时报 "Cancelling an overlapped future failed"。
 - **手动标题永不被自动概括覆盖**：自动标题走 `set_title_if_absent`（`_meta_lock` 保护的原子 check-and-set），已有标题（含自动标题）一律不覆盖；自动生成失败静默降级，记 `alfred.chat.titles` logger 进 alfred.log，不碰终端、不阻塞对话。
 
