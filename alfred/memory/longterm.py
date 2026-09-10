@@ -151,7 +151,9 @@ def add_async(
         if client is None:
             return
         with _add_lock:
-            with open(os.devnull, "w") as devnull:
+            # utf-8 + replace：窗口内其他线程（如 spinner 刷新）写到 devnull 时
+            # 不会因默认 GBK 编码无法表示 braille 字符而 UnicodeEncodeError 崩线程
+            with open(os.devnull, "w", encoding="utf-8", errors="replace") as devnull:
                 with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
                     try:
                         client.add(

@@ -128,6 +128,24 @@ def _print_startup_banner(
 _LOGGER_NAME = "alfred.chat"
 
 
+def _make_status(message: str, spinner: str = "dots"):
+    """构造 spinner status，并禁用 Rich Live 对 sys.stdout/stderr 的重定向。
+
+    Rich Live 默认在 start() 时把 sys.stdout/sys.stderr 换成内部 FileProxy，
+    stop() 时无条件装回"start 时保存的流"。longterm.add_async 后台线程的
+    devnull redirect 窗口可持续数十秒：若 status 在窗口内 start，Live 保存的
+    "原流"实为 devnull；窗口退出关闭 devnull 后，stop() 把已关闭的 devnull 装回
+    sys.stdout → 主线程 console.print 报 ValueError: I/O operation on closed file
+    （chat 崩溃/静默退出的根因之一）。stray print 已由 add_async 窗口兜底，
+    Live 的流重定向在这里没有收益，直接禁用。
+    """
+    status = console.status(message, spinner=spinner)
+    # Status 内部组合了一个 Live（rich>=14 不再是子类），标志要设在 _live 上
+    status._live._redirect_stdout = False
+    status._live._redirect_stderr = False
+    return status
+
+
 def _load_lessons_text(config: Config) -> str:
     """一次性读好 lessons 文本，供 inject_lessons 使用。"""
     try:
@@ -387,13 +405,13 @@ def models(
     if all_models:
         any_failed = False
         for ref, _ptype, _ready in rows:
-            with console.status(f"[dim]测试 {ref} ...[/dim]"):
+            with _make_status(f"[dim]测试 {ref} ...[/dim]"):
                 result = check_model_connection(config, ref)
             if not result["ok"]:
                 any_failed = True
             _print_connection_result(ref, result)
         embed_label = f"embedding:{config.models.embed.provider}"
-        with console.status(f"[dim]测试 {embed_label} ...[/dim]"):
+        with _make_status(f"[dim]测试 {embed_label} ...[/dim]"):
             result = check_embed_connection(config)
         if not result["ok"]:
             any_failed = True
@@ -408,7 +426,7 @@ def models(
         except (KeyError, ValueError) as e:
             console.print(f"[red]{e}[/red]")
             raise typer.Exit(1)
-        with console.status(f"[dim]测试 {model_ref} ...[/dim]"):
+        with _make_status(f"[dim]测试 {model_ref} ...[/dim]"):
             result = check_model_connection(config, model_ref)
         _print_connection_result(model_ref, result)
         if not result["ok"]:
@@ -659,7 +677,7 @@ def chat(
         total_chars = 0
         is_tty = console.is_terminal
 
-        status = console.status("[bold green]助手正在思考...[/bold green]", spinner="dots")
+        status = _make_status("[bold green]助手正在思考...[/bold green]", spinner="dots")
         if is_tty:
             status.start()
         status_active = is_tty
@@ -818,7 +836,7 @@ def _run_audit(config) -> None:
     from .memory.audit import format_audit_human
 
     try:
-        with console.status("[dim]审计中…[/dim]"):
+        with _make_status("[dim]审计中…[/dim]"):
             report = _do_audit(config)
         console.print(Markdown(format_audit_human(report)))
     except Exception as e:
@@ -832,7 +850,7 @@ def _run_chat_consolidate(config) -> None:
     """
     from .memory.consolidate import apply_drafts, generate_drafts
 
-    with console.status("[dim]复盘中…[/dim]"):
+    with _make_status("[dim]复盘中…[/dim]"):
         drafts = generate_drafts(config)
     if not drafts:
         console.print("[dim]近期没有需要整理的对话。[/dim]")
@@ -914,11 +932,11 @@ def _show_status(config) -> None:
     """在 chat 内显示当前 chat 模型与 embedding 的连接状态。"""
     from .llm import check_embed_connection, check_model_connection
 
-    with console.status(f"[dim]测试 {config.models.chat} ...[/dim]"):
+    with _make_status(f"[dim]测试 {config.models.chat} ...[/dim]"):
         chat_result = check_model_connection(config, config.models.chat)
 
     embed_label = f"embedding:{config.models.embed.provider}"
-    with console.status(f"[dim]测试 {embed_label} ...[/dim]"):
+    with _make_status(f"[dim]测试 {embed_label} ...[/dim]"):
         embed_result = check_embed_connection(config)
 
     chat_line = (
@@ -1048,7 +1066,7 @@ def ingest(notes_dir: Path = typer.Argument(..., help="笔记目录路径")):
     from .knowledge.ingest import ingest as do_ingest
 
     config = load_config()
-    with console.status("[dim]索引中（首次需下载 embedding 模型）…[/dim]"):
+    with _make_status("[dim]索引中（首次需下载 embedding 模型）…[/dim]"):
         stats = do_ingest(config, notes_dir)
     console.print(
         f"[green]完成：[/green]新增 {stats['added']} 篇，更新 {stats['updated']} 篇，"
@@ -1095,7 +1113,7 @@ def consolidate():
     from .memory.consolidate import apply_drafts, generate_drafts
 
     config = load_config()
-    with console.status("[dim]复盘中（使用记忆写入模型）…[/dim]"):
+    with _make_status("[dim]复盘中（使用记忆写入模型）…[/dim]"):
         drafts = generate_drafts(config)
     if not drafts:
         console.print("[dim]近期没有需要整理的对话。[/dim]")
