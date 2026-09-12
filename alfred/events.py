@@ -78,6 +78,17 @@ class TurnError(Event):
     error: str
 
 
+@dataclass(frozen=True)
+class TurnRetrying(Event):
+    """瞬时网络错误后的自动重试预告（重试不丢已建立的历史，工具不重复执行）。"""
+
+    session_id: str
+    attempt: int
+    max_retries: int
+    wait_seconds: float
+    error: str
+
+
 Listener = Callable[[Event], None]
 
 

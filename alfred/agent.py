@@ -17,8 +17,11 @@ import functools
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
+
+import httpx
 
 class ToolDeniedError(Exception):
     def __init__(self, reason: str):
@@ -46,6 +49,7 @@ from .events import (
     ToolDenied,
     TurnEnd,
     TurnError,
+    TurnRetrying,
     TurnStart,
 )
 from .history import Session, ToolCallRecord
@@ -671,6 +675,38 @@ def _load_history(session: Session) -> list | None:
     return None
 
 
+# 瞬时网络错误：连接中断/重置/超时，对端或链路抖动造成，退避重试通常可恢复。
+# anthropic/openai SDK 的 APIConnectionError/APITimeoutError 以 httpx 异常为 __cause__，
+# 沿异常链检查即可全部覆盖，无需直接依赖各 SDK 的异常类型。
+_TRANSIENT_NETWORK_ERRORS = (
+    httpx.ReadError,
+    httpx.WriteError,
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.ReadTimeout,
+    httpx.WriteTimeout,
+    httpx.PoolTimeout,
+    httpx.RemoteProtocolError,
+    ConnectionError,  # 含 ConnectionResetError / BrokenPipeError
+    TimeoutError,
+)
+
+_NETWORK_MAX_RETRIES = 3
+_NETWORK_BACKOFF_SECONDS = (2.0, 5.0, 10.0)
+
+
+def _is_transient_network_error(exc: BaseException) -> bool:
+    """沿 __cause__/__context__ 链判断是否为可重试的瞬时网络错误。"""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, _TRANSIENT_NETWORK_ERRORS):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
 def chat_turn_stream(
     agent: Agent[AlfredDeps, str],
     deps: AlfredDeps,
@@ -728,11 +764,34 @@ def chat_turn_stream(
             output = ""
             final_result = None
 
+            # 瞬时网络错误自动重试：异常发生在 run_stream_sync 调用处时
+            # current_history / user_prompt 尚未推进，重试同一调用是幂等的，
+            # 已执行的工具不会重复跑（结果已在 current_history 中）。
+            network_retries = 0
             with agent.parallel_tool_call_execution_mode("parallel"):
                 while True:
-                    result = agent.run_stream_sync(
-                        user_prompt, deps=turn_deps, message_history=current_history
-                    )
+                    try:
+                        result = agent.run_stream_sync(
+                            user_prompt, deps=turn_deps, message_history=current_history
+                        )
+                    except Exception as exc:
+                        if not _is_transient_network_error(exc) or network_retries >= _NETWORK_MAX_RETRIES:
+                            raise
+                        wait = _NETWORK_BACKOFF_SECONDS[
+                            min(network_retries, len(_NETWORK_BACKOFF_SECONDS) - 1)
+                        ]
+                        network_retries += 1
+                        bus.emit(
+                            TurnRetrying(
+                                session_id=session.id,
+                                attempt=network_retries,
+                                max_retries=_NETWORK_MAX_RETRIES,
+                                wait_seconds=wait,
+                                error=str(exc),
+                            )
+                        )
+                        time.sleep(wait)
+                        continue
                     final_result = result
                     for delta in result.stream_text(delta=True):
                         if delta:

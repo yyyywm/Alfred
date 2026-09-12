@@ -55,6 +55,7 @@ from alfred.events import (
     ToolDenied,
     TurnEnd,
     TurnError,
+    TurnRetrying,
     TurnStart,
 )
 
@@ -750,6 +751,18 @@ def chat(
                     close_stream()
                     if not is_tty and reply_parts:
                         console.print()
+                elif isinstance(event, TurnRetrying):
+                    close_stream()
+                    if not is_tty and reply_parts:
+                        console.print()
+                    console.print(
+                        f"[yellow]⚠ 网络波动（{event.error}），{event.wait_seconds:.0f}s 后自动重试"
+                        f"（第 {event.attempt}/{event.max_retries} 次）...[/yellow]"
+                    )
+                    logger.warning(
+                        "网络错误，%ss 后重试（第 %d/%d 次）: %s",
+                        event.wait_seconds, event.attempt, event.max_retries, event.error,
+                    )
                 elif isinstance(event, TurnError):
                     logger.error("TurnError: %s", event.error)
         except (Exception, KeyboardInterrupt) as e:

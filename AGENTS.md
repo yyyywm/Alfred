@@ -189,7 +189,7 @@ Alfred/
 
 ### Agent 内核（`alfred/agent.py`）
 - `build_agent()`：组装 Pydantic AI Agent，绑定模型、四层 system prompt、恒定工具集
-- `chat_turn_stream()`：单轮对话循环入口，基于 `EventBus` 以流式事件（`TurnStart`、`AssistantChunk`、`ToolCallStart`、`ToolCallEnd`、`ToolDenied`、`TurnEnd`、`TurnError`、`ContextCompacted`）返回运行过程；循环外通过订阅 `EventBus` 观察事件，不侵入核心逻辑
+- `chat_turn_stream()`：单轮对话循环入口，基于 `EventBus` 以流式事件（`TurnStart`、`AssistantChunk`、`ToolCallStart`、`ToolCallEnd`、`ToolDenied`、`TurnEnd`、`TurnError`、`TurnRetrying`、`ContextCompacted`）返回运行过程；循环外通过订阅 `EventBus` 观察事件，不侵入核心逻辑。瞬时网络错误（httpx 连接/读写/超时类，沿 `__cause__` 链识别）自动退避重试 3 次（2s/5s/10s），重试前发 `TurnRetrying` 事件；重试只发生在 `run_stream_sync` 流建立阶段，`current_history`/`user_prompt` 未推进，幂等不重复执行工具；流式输出中途断连不重试（避免重复输出与工具重放）
 - `_wrap_tool()`：为所有工具统一包装确认流程与生命周期事件（`ToolCallStart`/`ToolCallEnd`/`ToolDenied`），单轮工具调用硬上限 20 次
 - `chat_turn()`：`chat_turn_stream()` 的同步兼容包装，drains 事件流后返回最终文本
 - `AlfredDeps`：运行时依赖对象（config、blocks、confirm 回调、本轮召回记录、session_id、bus、tool_call_count）
