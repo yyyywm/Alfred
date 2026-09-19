@@ -168,6 +168,7 @@ Alfred/
 - `providers.<name>`：声明式 provider，含 `type`（`openai_compat` / `anthropic` / `gemini`）、`base_url`、`env_key`、可用 `models`
 - `models.chat`：闲聊模型，对话中可用 `/model provider:model` 自由切换
 - `models.memory_write`：记忆写入/复盘模型，固定强模型，质量敏感
+- `models.max_output_tokens`：单次回复最大输出 token 数（默认 16384），由 `build_agent` 传给模型。思考型模型会先消耗思考预算，太小（如 pydantic-ai 对 Anthropic 端点的默认 4096）会出现"只思考不输出"被 `finish_reason=length` 截断，报 "Model token limit exceeded before any response was generated"
 - `models.embed`：embedding 模型配置。`provider: local`（本地 sentence-transformers）或 `provider: openai_compat`（云端 embedding API）。支持 `hf_endpoint` 镜像地址、`local_dir` 本地目录、`base_url`/`env_key`/`api_key` API 鉴权。模型一旦选定不要换，否则 notes/frameworks/episodes 向量库需要全量重建。
 - `memory.*`：记忆块字符上限（`block_char_limit` 全局默认 + `<block>_block_char_limit` 逐块覆盖）、召回硬预算、近因半衰期、`provider`（记忆客户端选择）、`default_user_id`（多 agent 共享时的租户隔离，代码中不再保留硬编码副本）
 - `paths.*`：history/vectordb/skills/rules 目录

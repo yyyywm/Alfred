@@ -9,6 +9,12 @@ def test_default_config():
     cfg = Config()
     assert cfg.memory.block_char_limit == 2000
     assert cfg.memory.recall_budget == 10
+    assert cfg.models.max_output_tokens == 16384
+
+
+def test_max_output_tokens_override():
+    cfg = Config(models={"max_output_tokens": 32768})
+    assert cfg.models.max_output_tokens == 32768
 
 
 def test_resolve_model_ref():

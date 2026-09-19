@@ -36,6 +36,7 @@ from queue import Queue
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelResponse, ToolCallPart
+from pydantic_ai.settings import ModelSettings
 
 from .compaction import maybe_compact
 from .config import Config
@@ -282,6 +283,7 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
         build_model(config, model_ref or config.models.chat),
         deps_type=AlfredDeps,
         instructions=INSTRUCTIONS,
+        model_settings=ModelSettings(max_tokens=config.models.max_output_tokens),
     )
 
     # ── ② 半静态层：memory blocks（内容会变，但位置固定）────────────

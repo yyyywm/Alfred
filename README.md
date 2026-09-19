@@ -220,6 +220,7 @@ providers:
 models:
   chat: deepseek:deepseek-chat          # 闲聊模型，对话中 /model 自由切
   memory_write: kimi-for-coding:k3       # 记忆写入路径：固定强模型，质量敏感
+  max_output_tokens: 16384               # 单次回复最大输出 token；思考型模型太小会"只思考不输出"被截断
   embed:
     provider: local                      # local（本地 sentence-transformers）或 openai_compat（云端 API）
     name: Qwen/Qwen3-Embedding-0.6B

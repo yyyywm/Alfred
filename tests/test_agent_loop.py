@@ -10,6 +10,7 @@ from alfred.agent import (
     _is_transient_network_error,
     _NETWORK_MAX_RETRIES,
     _wrap_tool,
+    build_agent,
     chat_turn_stream,
 )
 from alfred.config import Config, ProviderConfig
@@ -32,8 +33,24 @@ def _test_config(tmp_path):
         providers={
             "dummy": ProviderConfig(type="openai_compat", models=["m"]),
         },
+        models={"chat": "dummy:m", "memory_write": "dummy:m"},
         paths={"history_dir": str(tmp_path / "hist")},
     )
+
+
+def test_build_agent_sets_max_output_tokens(tmp_path):
+    """build_agent 应把 models.max_output_tokens 传给模型（思考型模型防截断）。"""
+    cfg = _test_config(tmp_path)
+    agent = build_agent(cfg)
+    assert agent.model_settings["max_tokens"] == cfg.models.max_output_tokens
+
+    cfg2 = Config(
+        providers={"dummy": ProviderConfig(type="openai_compat", models=["m"])},
+        models={"chat": "dummy:m", "max_output_tokens": 32768},
+        paths={"history_dir": str(tmp_path / "hist")},
+    )
+    agent2 = build_agent(cfg2)
+    assert agent2.model_settings["max_tokens"] == 32768
 
 
 def _make_tool_stream():

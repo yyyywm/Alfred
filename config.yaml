@@ -43,6 +43,9 @@ models:
   # 记忆写入路径（事实抽取、consolidate 复盘）：固定用强模型，质量敏感
   # memory_write: shangtang:sensenova-6.8-flash-lite
   memory_write: kimi-for-coding:k3
+  # 单次回复最大输出 token。思考型模型会先烧思考预算，太小会出现
+  # "只思考不输出"被截断（Model token limit exceeded）。16384 起步。
+  max_output_tokens: 16384
   # embedding：本地模型或 OpenAI 兼容 API，选定后不要换（换 = 全量重建索引）
   embed:
     provider: openai_compat     # local（本地 sentence-transformers）或 openai_compat（云端 API）

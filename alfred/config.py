@@ -67,6 +67,10 @@ class ModelsConfig(BaseModel):
     chat: str = "deepseek:deepseek-chat"
     memory_write: str = "deepseek:deepseek-chat"
     embed: EmbedConfig = EmbedConfig()
+    # 单次回复的最大输出 token 数。思考型模型会先消耗思考预算，
+    # 太小（如 pydantic-ai 对 Anthropic 端点的默认 4096）会出现
+    # "只思考不输出"被 finish_reason=length 截断，报 token limit exceeded。
+    max_output_tokens: int = 16384
 
 
 class MemoryConfig(BaseModel):
