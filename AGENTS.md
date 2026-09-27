@@ -74,6 +74,9 @@ alfred skills
 
 # 检索已提炼的思维框架
 alfred frameworks <query>
+
+# 一键备份全部数据（含 .env 与技能目录），供迁移到其他机器
+alfred backup [-o <输出路径>]
 ```
 
 ## 项目结构
@@ -97,6 +100,7 @@ Alfred/
 │   ├── titles.py           # 自动会话标题：首轮后后台概括（≤15 字）
 │   ├── compaction.py       # 上下文压缩：丢内容留指针 + 偏好优先
 │   ├── codewriting.py      # 自举进化：code_patch 三重门禁（路径/语法/测试）
+│   ├── backup.py           # 数据备份：打包 config/.env/data/rules + 项目外 skills/rules 目录为 zip
 │   │
 │   ├── memory/             # 记忆层（agent 对用户的认知）
 │   │   ├── protocols.py    # MemoryClient / EmbeddingClient 协议接口
@@ -178,7 +182,8 @@ Alfred/
 ## 代码组织与模块职责
 
 ### CLI（`alfred/cli.py`）
-- 所有用户命令入口：`chat`、`ingest`、`feed`、`frameworks`、`consolidate`、`memory`、`skills`、`models`
+- 所有用户命令入口：`chat`、`ingest`、`feed`、`frameworks`、`consolidate`、`memory`、`skills`、`models`、`backup`
+- `backup`：一键打包全部数据（`config.yaml`/`.env`/`rules`/`data`/`hist` + 项目外 skills/rules 目录，见 `backup.py`）为 zip，含 RESTORE.md 恢复说明；默认输出 `backups/alfred-backup-<时间戳>.zip`（已 gitignore）；排除 `.lock`/`__pycache__`；备份含 .env 明文 key，需提醒用户妥善保管
 - `chat` 内支持斜杠命令：`/exit`、`/new`、`/model`、`/remember`、`/memory`、`/why`、`/sessions`、`/load`、`/delete`、`/title`、`/lessons`、`/status`、`/whoami`、`/trust`、`/consolidate`、`/consolidate-review`、`/audit`、`/help`
 - `chat` 启动选项：`--session/-s` 恢复会话、`--debug` 启用调试日志输出到控制台
 - `chat` 交互使用 `prompt_toolkit.PromptSession`：支持行编辑（光标移动、删除、历史）、长输入；发送后显示 `助手正在思考...` spinner，收到首个事件后切换为 `助手：` 前缀；工具调用单独成行显示
@@ -322,6 +327,7 @@ python -m pytest tests/ -q
 - `test_agent_loop.py`：agent 工具调用循环、消息保序、事件流
 - `test_history_tool_calls.py`：工具调用记录持久化
 - `test_llm.py`：LLM 连接测试与错误映射
+- `test_backup.py`：备份打包内容、排除项（.lock/__pycache__）、默认输出路径、项目内 rules 目录不重复进 external/
 
 **约束**：测试不依赖真实 LLM 调用、不下载 embedding 模型、不访问外部 API。
 

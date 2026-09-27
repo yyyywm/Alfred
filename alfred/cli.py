@@ -1192,5 +1192,25 @@ def skills():
         console.print(f"  {r.name} [{tag}] — {r.description}")
 
 
+@app.command()
+def backup(
+    output: Path | None = typer.Option(
+        None, "--output", "-o",
+        help="备份 zip 输出路径（默认 backups/alfred-backup-<时间戳>.zip）",
+    ),
+):
+    """打包全部数据（含 .env 与技能目录），供迁移到其他机器。"""
+    from .backup import create_backup
+
+    config = load_config()
+    with _make_status("[dim]正在打包数据…[/dim]"):
+        path, count = create_backup(config, output)
+    size_mb = path.stat().st_size / 1024 / 1024
+    console.print(
+        f"[green]备份完成：[/green]{path}（{count} 个文件，{size_mb:.1f} MB）\n"
+        "[yellow]注意：备份包含 .env 明文 API key，请妥善保管。[/yellow]"
+    )
+
+
 if __name__ == "__main__":
     app()

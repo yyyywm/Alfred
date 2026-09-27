@@ -1,5 +1,6 @@
 # 运行时数据不入库
 data/
+backups/
 .venv/
 __pycache__/
 *.egg-info/
