@@ -76,6 +76,7 @@ INSTRUCTIONS = """你是用户的私人管家——也是秘书和朋友。你�
 
 ## 工具准则
 - file_read 可以读取技能（SKILL.md）和规则文件——看到索引里匹配的技能/规则就先读再行动
+- 查实时信息、外部知识、新闻、资料时用 web_search；拿到具体 URL 后用 web_fetch 读全文。引用联网信息时标注来源链接
 - shell 和 run_python 会请求用户确认，说明你要做什么
 - 工具报错时读懂错误信息再修正重试，不要盲目重复
 """
@@ -617,6 +618,34 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
 
         return do_patch(path, old_string, new_string)
 
+    # ── 联网工具 ────────────────────────────────────────────────────
+    # 宿主侧搜索/抓取（对标 Kimi Code 的 WebSearch/FetchURL），
+    # 只读操作，不走用户确认（与 file_read 同一先例）
+
+    def web_search(ctx: RunContext[AlfredDeps], query: str, limit: int = 5) -> str:
+        """联网搜索。用于查实时信息、新闻、外部资料、你不知道的概念等。
+        返回标题+链接+摘要列表；拿到相关链接后用 web_fetch 读取全文。"""
+        from . import web
+
+        try:
+            results = web.search_web(ctx.deps.config, query, limit=limit)
+        except web.WebError as e:
+            return f"搜索暂不可用（{e}）。可以稍后再试，或换个搜索词。"
+        lines = []
+        for i, r in enumerate(results, 1):
+            lines.append(f"{i}. {r['title']}\n   {r['url']}\n   {r['snippet']}")
+        return "\n\n".join(lines)
+
+    def web_fetch(ctx: RunContext[AlfredDeps], url: str) -> str:
+        """抓取一个网页的正文文本。用于阅读 web_search 找到的具体页面，
+        或用户直接给出的链接。"""
+        from . import web
+
+        try:
+            return web.fetch_webpage(ctx.deps.config, url)
+        except web.WebError as e:
+            return f"网页读取失败（{e}）"
+
     # ── 情景记忆写入 ────────────────────────────────────────────────
     # 让 agent 在成功完成任务后主动把经验沉淀为四元组，补全情景记忆
 
@@ -660,6 +689,8 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
     agent.tool(_wrap_tool(schedule_create, "schedule_create"))
     agent.tool(_wrap_tool(schedule_delete, "schedule_delete"))
     agent.tool(_wrap_tool(schedule_list, "schedule_list"))
+    agent.tool(_wrap_tool(web_search, "web_search"))
+    agent.tool(_wrap_tool(web_fetch, "web_fetch"))
     agent.tool(_wrap_tool(shell, "shell"))
     agent.tool(_wrap_tool(run_python, "run_python"))
     agent.tool(_wrap_tool(code_patch, "code_patch"))
