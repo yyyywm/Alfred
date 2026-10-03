@@ -7,6 +7,7 @@
 Alfred 是一个以**长期记忆**和**个人知识库**为核心的私人智能体：
 
 - **认识你**：跨会话记住你的经历、偏好、思维方式，越用越懂你
+- **能联网**：自主搜索网页、阅读链接内容，回答时标注来源
 - **读你的笔记**：索引个人笔记库，回答问题时引用出处
 - **可以喂养**：喂给它书籍文章，提炼成思维框架，成为它思考的工具
 - **会反思成长**：遇到失败和纠正时自动提炼教训（RefleXion 机制），下次类似场景自动激活
@@ -24,6 +25,7 @@ Alfred 是一个以**长期记忆**和**个人知识库**为核心的私人智�
 | 让它记住你 | 直接聊天，它会自动提炼记忆；或用 `/remember` 显式教学 |
 | 查你的笔记 | 索引笔记后，问它"我之前写的 XX 笔记说了什么" |
 | 学习新知识 | 把书/文章喂给它：`alfred feed book.md`，它提炼成思维框架 |
+| 查联网信息 | 直接问它实时问题，它会用 web_search 搜索、web_fetch 读全文并标注来源 |
 | 复盘成长 | `alfred consolidate` 让它从对话中提炼教训，下次用得上 |
 
 ### 作为你的代码伙伴（编程使用）
@@ -244,6 +246,13 @@ paths:
   vectordb_dir: data/vectordb
   skills_dirs: [~/.agents/skills]
   rules_dirs: [rules]
+
+# 联网工具（web_search / web_fetch），全部可省略走默认值
+web:
+  search_provider: bing       # bing=免 key；tavily=结构化 API（需 .env 配 TAVILY_API_KEY）
+  # search_max_results: 5
+  # fetch_max_chars: 4000
+  # timeout_s: 30
 ```
 
 ### 关键配置原则

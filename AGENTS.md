@@ -176,6 +176,7 @@ Alfred/
 - `models.embed`：embedding 模型配置。`provider: local`（本地 sentence-transformers）或 `provider: openai_compat`（云端 embedding API）。支持 `hf_endpoint` 镜像地址、`local_dir` 本地目录、`base_url`/`env_key`/`api_key` API 鉴权。模型一旦选定不要换，否则 notes/frameworks/episodes 向量库需要全量重建。
 - `memory.*`：记忆块字符上限（`block_char_limit` 全局默认 + `<block>_block_char_limit` 逐块覆盖）、召回硬预算、近因半衰期、`provider`（记忆客户端选择）、`default_user_id`（多 agent 共享时的租户隔离，代码中不再保留硬编码副本）
 - `paths.*`：history/vectordb/skills/rules 目录
+- `web.*`：联网工具配置。`search_provider`（`bing` 免 key / `tavily` 需 `search_env_key` 指向的 API key，缺 key 自动回退 bing）、`search_max_results`、`fetch_max_chars`（web_fetch 正文截断上限）、`timeout_s`（联网请求超时）
 
 模型引用格式统一为 `provider:model`，由 `config.resolve()` 解析。
 
@@ -207,7 +208,7 @@ Alfred/
 4. 静态缓存层：`skill_index` + `lessons_text`（build_agent 时一次性预加载，避免每轮 I/O）
 5. 动态层：常驻规则 + 可召回规则索引 + 当前日期（`inject_rules`、`inject_date`）
 
-**恒定工具集（`agent.py` 中注册，共 17 个）：**
+**恒定工具集（`agent.py` 中注册，共 19 个）：**
 - `memory_search`：长期记忆召回（混合相关性 + 近因排序）。召回结果累加进 `deps.last_recalled`（`extend`，不是重新绑定），一轮内多次召回都要能被 `/why` 看到；`chat_turn_stream` 每轮用新的空列表建 `turn_deps`，轮间不串
 - `memory_update_block`：更新 human/persona 块（human 和 persona 修改均需用户确认）
 - `notes_search`：笔记 RAG
@@ -218,6 +219,8 @@ Alfred/
 - `session_search`：搜索当前会话历史
 - `frameworks_search`：检索已提炼的思维框架
 - `schedule_create` / `schedule_delete` / `schedule_list`：agent 自调度定时任务
+- `web_search`：联网搜索（宿主侧实现，对标 Kimi Code WebSearch；后端由 `web.search_provider` 切换：`bing` 免 key 爬 HTML / `tavily` 结构化 API，tavily 缺 key 自动回退 bing）。只读操作，不走用户确认
+- `web_fetch`：抓取网页正文（`alfred/web.py`，标准库 `html.parser` 抽取可见文本，跳过 script/style/noscript，截断到 `web.fetch_max_chars`；非 HTML / 下载上限 2MB / 动态渲染空页面均返回友好错误）。只读操作，不走用户确认
 - `shell`：执行 shell 命令（需用户确认）
 - `run_python`：执行 Python 代码（需用户确认）
 - `code_patch`：自举进化工具，精确替换源代码中的一段文本（需用户确认，三重门禁，单轮最多一次）
@@ -346,6 +349,7 @@ python -m pytest tests/ -q
 - **Telemetry 关闭**：mem0 中设置 `MEM0_TELEMETRY=false`，防止私人数据上报。
 - **文件读取范围**：`file_read` 工具目前只检查文件存在性，不限制路径范围；读取用户指定文件时按操作系统权限执行。
 - **命令执行超时**：shell / run_python 默认 60 秒超时，输出截断至 5000 字符。
+- **联网工具为只读操作**：web_search / web_fetch 不写入任何本地状态、不走用户确认（与 file_read 同一先例）；请求超时由 `web.timeout_s` 控制（默认 30s），单次抓取下载上限 2MB，正文截断到 `web.fetch_max_chars`。
 - **工具调用上限**：单轮对话硬上限 20 次，防止 agent 失控。
 
 ## 扩展机制
