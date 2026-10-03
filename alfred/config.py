@@ -108,11 +108,27 @@ class PathsConfig(BaseModel):
     rules_dirs: list[str] = ["rules"]
 
 
+class WebConfig(BaseModel):
+    # web_search 后端：bing（免 key，爬 HTML）或 tavily（结构化 API，需 key）
+    search_provider: Literal["bing", "tavily"] = "bing"
+    # tavily 时从 .env 读取 key 的变量名
+    search_env_key: str = "TAVILY_API_KEY"
+    search_max_results: int = 5
+    # web_fetch 返回正文上限；留余量给工具层 5000 字符统一截断
+    fetch_max_chars: int = 4000
+    timeout_s: int = 30
+
+    def search_api_key(self) -> str | None:
+        key = os.environ.get(self.search_env_key)
+        return key or None
+
+
 class Config(BaseModel):
     providers: dict[str, ProviderConfig] = {}
     models: ModelsConfig = ModelsConfig()
     memory: MemoryConfig = MemoryConfig()
     paths: PathsConfig = PathsConfig()
+    web: WebConfig = WebConfig()
 
     def resolve(self, model_ref: str) -> tuple[str, ProviderConfig, str]:
         """把 'provider:model' 解析为 (provider_name, provider_config, model)。"""
