@@ -185,7 +185,8 @@ Alfred/
 ### CLI（`alfred/cli.py`）
 - 所有用户命令入口：`chat`、`ingest`、`feed`、`frameworks`、`consolidate`、`memory`、`skills`、`models`、`backup`
 - `backup`：一键打包全部数据（`config.yaml`/`.env`/`rules`/`data`/`hist` + 项目外 skills/rules 目录，见 `backup.py`）为 zip，含 RESTORE.md 恢复说明；默认输出 `backups/alfred-backup-<时间戳>.zip`（已 gitignore）；排除 `.lock`/`__pycache__`；备份含 .env 明文 key，需提醒用户妥善保管
-- `chat` 内支持斜杠命令：`/exit`、`/new`、`/model`、`/remember`、`/memory`、`/why`、`/sessions`、`/load`、`/delete`、`/title`、`/lessons`、`/status`、`/whoami`、`/trust`、`/consolidate`、`/consolidate-review`、`/audit`、`/help`
+- `chat` 内支持斜杠命令：`/exit`、`/new`、`/model`、`/remember`、`/memory`、`/why`、`/sessions`、`/load`、`/delete`、`/title`、`/lessons`、`/status`、`/tools`、`/whoami`、`/trust`、`/consolidate`、`/consolidate-review`、`/audit`、`/help`
+- `/tools`：列出 agent 对象上实际注册的工具（ground truth）。模型自称的工具清单不可靠——它无法真正内省注册表，且会被会话历史中自己之前的断言锚定/编造（曾出现旧会话里模型坚称"只有记忆工具"、甚至编出不存在的工具名的情况）；排查"工具调不了"时以 `/tools` 输出为准，再用直接指令（"调用 web_search 搜索 X"）验证实际调用
 - `chat` 启动选项：`--session/-s` 恢复会话、`--debug` 启用调试日志输出到控制台
 - `chat` 交互使用 `prompt_toolkit.PromptSession`：支持行编辑（光标移动、删除、历史）、长输入；发送后显示 `助手正在思考...` spinner，收到首个事件后切换为 `助手：` 前缀；工具调用单独成行显示
 - 所有 Rich Console 输出集中在主线程渲染，避免与后台 agent 线程竞争；用户确认回调 `_confirm` 用原生 `print/input` 实现以降低线程安全风险
