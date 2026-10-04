@@ -10,6 +10,7 @@ chat 内斜杠命令：
   /trust 管理工具信任白名单（默认允许某类工具，不再每次询问）
   /whoami 查看 Alfred 的积累状态（记忆/教训/情景/笔记/框架）
   /status 检查当前模型与 embedding 连接
+  /tools 列出 agent 实际注册的工具（ground truth，区别于模型自称的工具清单）
   /consolidate-review 查看自动复盘暂存的待审查草稿
 """
 
@@ -573,6 +574,18 @@ def chat(
                     console.print("[dim]上一轮没有使用长期记忆。[/dim]")
             elif cmd == "/status":
                 _show_status(config)
+            elif cmd == "/tools":
+                # agent 对象上实际注册的工具（ground truth）——
+                # 模型自称的工具清单不可靠（会被会话历史锚定/编造），以此为准
+                tool_names = sorted(
+                    name
+                    for ts in agent.toolsets
+                    for name in getattr(ts, "tools", {})
+                )
+                console.print(Panel(
+                    "\n".join(f"- {n}" for n in tool_names),
+                    title=f"已注册工具（{len(tool_names)} 个）",
+                ))
             elif cmd == "/whoami":
                 _show_whoami(config, blocks)
             elif cmd == "/lessons":
