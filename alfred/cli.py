@@ -955,8 +955,9 @@ def _show_memory(config) -> None:
 
 
 def _show_status(config) -> None:
-    """在 chat 内显示当前 chat 模型与 embedding 的连接状态。"""
+    """在 chat 内显示当前 chat 模型、embedding 与记忆层的状态。"""
     from .llm import check_embed_connection, check_model_connection
+    from .memory import longterm
 
     with _make_status(f"[dim]测试 {config.models.chat} ...[/dim]"):
         chat_result = check_model_connection(config, config.models.chat)
@@ -975,11 +976,27 @@ def _show_status(config) -> None:
         if embed_result["ok"]
         else f"[red]✗[/red]  {embed_result['error']}"
     )
-    ok = chat_result["ok"] and embed_result["ok"]
+    # 记忆层是懒加载：不触发初始化，只报告已知状态
+    # （失败原因由 longterm.init_status 暴露，成功由 peek_client 确认）
+    mem_err = longterm.init_status()
+    if mem_err:
+        mem_line = (
+            f"[red]✗[/red]  初始化失败：{mem_err}\n"
+            f"       [dim]提示：检查 data/vectordb/qdrant_mem0/.lock 锁文件残留后重启[/dim]"
+        )
+        mem_ok = False
+    elif longterm.peek_client(config) is not None:
+        mem_line = "[green]✓[/green]  在线"
+        mem_ok = True
+    else:
+        mem_line = "[dim]-  未初始化（首次记忆操作时懒加载）[/dim]"
+        mem_ok = True  # 未初始化不算故障
+    ok = chat_result["ok"] and embed_result["ok"] and mem_ok
     console.print(Panel(
         f"当前模型：{config.models.chat}\n"
         f"  chat   {chat_line}\n"
-        f"  embed  {embed_line}",
+        f"  embed  {embed_line}\n"
+        f"  memory {mem_line}",
         title="[bold]连接状态[/bold]",
         border_style="green" if ok else "red",
     ))

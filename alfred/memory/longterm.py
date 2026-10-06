@@ -4,7 +4,9 @@
 - 记忆写入路径固定用 config.models.memory_write 的强模型（抽取质量敏感）
 - 所有客户端实现同一 MemoryClient 协议，支持多 agent 共享
 - 多 agent 共享时通过 user_id 实现租户隔离
-- 初始化失败时降级为空实现——记忆系统故障不应让对话崩溃
+- 初始化失败时降级为空实现——记忆系统故障不应让对话崩溃，
+  但失败必须可见（init_status），不能静默（借鉴 operator-memory
+  的 "Failure Is Visible"：故障留在可检查的地方，而不是吞掉）
 """
 
 from __future__ import annotations
@@ -21,6 +23,10 @@ from .protocols import MemoryClient
 _user_clients: dict[str, MemoryClient] = {}
 _provider = "local"
 _init_failed = False
+# 最近一次初始化失败的原因（异常类型: 消息），供 init_status() 暴露给
+# CLI / agent——旧实现只有 _init_failed 布尔位，用户聊了很久才发现记忆
+# 根本没写入（mem0 Qdrant .lock 残留是最常见原因）。
+_init_error: str | None = None
 
 # redirect_stdout 换的是进程全局 sys.stdout：两个写入线程重叠时，后退出者
 # 会把 sys.stdout 恢复成对方已关闭的 devnull，主线程下一次 print 即
@@ -29,11 +35,13 @@ _add_lock = threading.Lock()
 
 
 def _select_provider(config: Config) -> str:
-    global _provider
+    global _provider, _init_failed, _init_error
     chosen = config.memory.provider
     if chosen != _provider:
         _provider = chosen
         _user_clients.clear()
+        _init_failed = False
+        _init_error = None
     return chosen
 
 
@@ -62,17 +70,38 @@ def _make_client(config: Config, user_id: str) -> MemoryClient:
 
 
 def _new_client_safe(config: Config, user_id: str) -> MemoryClient | None:
+    global _init_failed, _init_error
     try:
         return _make_client(config, user_id)
     except Exception as exc:
         if _is_qdrant_lock_error(exc) and _clear_qdrant_lock(config):
             try:
                 return _make_client(config, user_id)
-            except Exception:
-                pass
-        global _init_failed
+            except Exception as retry_exc:
+                _init_failed = True
+                _init_error = f"{type(retry_exc).__name__}: {retry_exc}"
+                return None
         _init_failed = True
+        _init_error = f"{type(exc).__name__}: {exc}"
         return None
+
+
+def init_status() -> str | None:
+    """记忆层初始化失败的原因；未尝试过或初始化成功返回 None。
+
+    失败可见化入口：CLI `/status` 与 memory_search 工具用它把
+    "记忆层离线" surfaced 给用户/agent，而不是静默降级为空结果。
+    """
+    return _init_error
+
+
+def peek_client(config: Config, user_id: str | None = None) -> MemoryClient | None:
+    """只读缓存：已初始化的 client 则返回，未初始化返回 None（不触发构建）。
+
+    供 `/status` 这类诊断视图使用——get_client 是懒加载且首次构建可能
+    下载 embedding 模型，诊断命令不应触发重初始化。
+    """
+    return _user_clients.get(user_id or config.memory.default_user_id)
 
 
 def get_client(config: Config, user_id: str | None = None) -> MemoryClient | None:
@@ -91,8 +120,10 @@ def get_memory(config: Config, user_id: str | None = None) -> MemoryClient | Non
 
 def reset_clients() -> None:
     """测试/切换 provider 时清理缓存。"""
-    global _user_clients
+    global _user_clients, _init_failed, _init_error
     _user_clients = {}
+    _init_failed = False
+    _init_error = None
 
 
 # 租户 id 一律从 config.memory.default_user_id 读取，这里不再放硬编码副本
