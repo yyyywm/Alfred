@@ -238,3 +238,62 @@ def delete(config: Config, memory_id: str, user_id: str | None = None) -> bool:
         return client.delete(memory_id, user_id=user_id or config.memory.default_user_id)
     except Exception:
         return False
+
+
+# ── 事实型记忆写入：去重门禁 ─────────────────────────────────────────
+# 借鉴 operator-memory 对 replay 式记忆的批判："过时的决策和它的替代者
+# 并排出现，模型自己猜"。mem0 内部的 ADD/UPDATE/DELETE 推断能处理语义级
+# 冲突，但 consolidate 反复跑、对话反复提同一事实时，近乎相同的记录会
+# 绕过语义阈值不断累积。写入前做一次确定性去重：相似度足够高就跳过，
+# 保持"一个事实一份记录"。
+
+# 字符/词集合 Jaccard 相似度阈值：≥ 0.85 视为同一事实的重复表述。
+# 校准依据：「用户喜欢喝冰咖啡」vs「用户喜欢喝咖啡」= 0.875（应去重）；
+# 「每周三打羽毛球」vs「每周四打羽毛球」= 0.8（真不同事实，必须保留）。
+_DUP_SIMILARITY_THRESHOLD = 0.85
+_DUP_SEARCH_LIMIT = 5
+
+
+def _text_signature(text: str) -> set[str]:
+    """文本签名：CJK 按字符、拉丁按词，小写归一。
+
+    中文没有空格分词，按字取集合对"用户喜欢咖啡"vs"用户喜欢喝咖啡"
+    这类近重复有足够的区分度，且零依赖、确定性、可测试。
+    """
+    return set(re.findall(r"[a-z0-9]+|[一-鿿]", text.lower()))
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def is_near_duplicate(text_a: str, text_b: str,
+                      threshold: float = _DUP_SIMILARITY_THRESHOLD) -> bool:
+    """两条记忆文本是否近似重复。"""
+    return _jaccard(_text_signature(text_a), _text_signature(text_b)) >= threshold
+
+
+def add_fact(config: Config, text: str, user_id: str | None = None) -> dict:
+    """写入一条事实型记忆，写入前做近重复去重。
+
+    返回 {"status": "added"|"duplicate"|"offline", ...}：
+    - duplicate：已存在相似度 ≥ 阈值的记忆，跳过写入（附 existing 文本）
+    - offline：记忆层不可用，未写入
+    - added：已写入
+    """
+    uid = user_id or config.memory.default_user_id
+    client = get_client(config, uid)
+    if client is None:
+        return {"status": "offline"}
+    try:
+        neighbors = client.search(text, limit=_DUP_SEARCH_LIMIT, user_id=uid)
+    except Exception:
+        neighbors = []  # 检索失败不阻塞写入；mem0 内部推断兜底
+    for m in neighbors:
+        existing = m.get("memory") or m.get("text") or ""
+        if existing and is_near_duplicate(text, existing):
+            return {"status": "duplicate", "existing": existing}
+    client.add([{"role": "user", "content": text}], user_id=uid)
+    return {"status": "added"}

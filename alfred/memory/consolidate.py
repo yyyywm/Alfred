@@ -177,14 +177,15 @@ def apply_drafts(config: Config, drafts: dict,
 
     for entry in drafts.get("memory_entries") or []:
         if confirm(f"写入长期记忆：\n  {entry}\n确认？"):
-            mem = longterm.get_memory(config)
-            if mem is not None:
-                try:
-                    mem.add([{"role": "user", "content": entry}],
-                            user_id=config.memory.default_user_id)
+            try:
+                # 写入前去重：同一事实只留一份记录，避免竞争记录并排召回
+                result = longterm.add_fact(config, entry)
+                if result["status"] == "added":
                     applied.append(f"记忆条目：{entry[:50]}")
-                except Exception:
-                    pass
+                elif result["status"] == "duplicate":
+                    applied.append(f"记忆条目（已存在，跳过）：{entry[:50]}")
+            except Exception:
+                pass
 
     human_update = drafts.get("human_block_update")
     if human_update and confirm(
@@ -290,14 +291,14 @@ def apply_unattended(config: Config, drafts: dict) -> list[str]:
             except Exception:
                 pass
 
-    # 2) memory_entries 自动写入（用户事实沉淀，非敏感）
+    # 2) memory_entries 自动写入（用户事实沉淀，非敏感；写入前近重复去重）
     for entry in drafts.get("memory_entries") or []:
         try:
-            mem = longterm.get_memory(config)
-            if mem is not None:
-                mem.add([{"role": "user", "content": entry}],
-                        user_id=config.memory.default_user_id)
+            result = longterm.add_fact(config, entry)
+            if result["status"] == "added":
                 applied.append(f"记忆条目：{entry[:50]}")
+            elif result["status"] == "duplicate":
+                applied.append(f"记忆条目（已存在，跳过）：{entry[:50]}")
         except Exception:
             pass
 
