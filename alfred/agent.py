@@ -346,9 +346,11 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
         当你需要回忆用户说过的话、了解用户某方面情况时使用。"""
         from .memory import longterm
 
-        # 失败可见化：记忆层离线时返回明确诊断，而不是静默返回"没有记忆"
-        # （旧行为下 agent 会把离线误读为"用户没有相关记忆"并据此回答）
-        if longterm.get_client(ctx.deps.config) is None:
+        memories = recall.recall(ctx.deps.config, query)
+        # 失败可见化：只在"召回为空且记忆层确实离线"时才报诊断——
+        # 有结果时不打扰；离线时不能伪装成"没有记忆"让 agent 据此回答。
+        # get_client 是缓存的（recall 内部已触发），此处不产生二次初始化。
+        if not memories and longterm.get_client(ctx.deps.config) is None:
             err = longterm.init_status()
             hint = f"（{err}）" if err else ""
             return (
@@ -356,7 +358,6 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
                 "请明确告知用户记忆层离线（不要假装没有相关记忆），"
                 "并建议检查 data/vectordb/qdrant_mem0/.lock 锁文件残留后重启。"
             )
-        memories = recall.recall(ctx.deps.config, query)
         # 累加而非重新绑定：一轮内可能多次召回，/why 要能显示全部依据
         ctx.deps.last_recalled.extend(m.get("memory", str(m)) for m in memories)
         return recall.render_for_prompt(memories)
