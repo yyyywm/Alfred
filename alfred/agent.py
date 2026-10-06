@@ -116,6 +116,8 @@ class AlfredDeps:
     lessons_text: str = ""
     # 规则层：常驻规则 + 可召回规则索引，build_agent 时一次读好
     rules_text: str = ""
+    # 笔记目录：ingest 生成的确定性路由地图（operator-memory catalog 思想）
+    notes_catalog: str = ""
 
 
 # 单轮工具调用硬上限
@@ -326,6 +328,10 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
     @agent.system_prompt
     def inject_lessons(ctx: RunContext[AlfredDeps]) -> str:
         return ctx.deps.lessons_text
+
+    @agent.system_prompt
+    def inject_notes_catalog(ctx: RunContext[AlfredDeps]) -> str:
+        return ctx.deps.notes_catalog
 
     # ── ③ 动态层：规则、日期（易变信息放最后）──────────────────
 
@@ -804,6 +810,7 @@ def chat_turn_stream(
         skill_index=deps.skill_index,
         lessons_text=deps.lessons_text,
         rules_text=deps.rules_text,
+        notes_catalog=deps.notes_catalog,
     )
 
     error_holder: list[Exception] = []

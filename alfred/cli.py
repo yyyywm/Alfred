@@ -451,6 +451,9 @@ def chat(
     _lessons_text = _load_lessons_text(config)
     _always_rules, _recall_rules = render_rules(scan_rules(config))
     _rules_text = "\n\n".join(t for t in (_always_rules, _recall_rules) if t)
+    # 笔记目录：ingest 生成的确定性路由地图（不存在时为空串，不注入）
+    from .knowledge.catalog import load_catalog as _load_notes_catalog
+    _notes_catalog = _load_notes_catalog(config)
     deps = AlfredDeps(
         config=config,
         blocks=blocks,
@@ -458,6 +461,7 @@ def chat(
         skill_index=_skill_index,
         lessons_text=_lessons_text,
         rules_text=_rules_text,
+        notes_catalog=_notes_catalog,
     )
     logger = _setup_chat_logger(config, debug=debug)
 

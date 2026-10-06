@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 from ..config import Config
-from . import store
+from . import catalog, store
 from .chunking import chunk_markdown
 from .embed import embed_texts
 
@@ -86,6 +86,9 @@ def ingest(config: Config, notes_dir: Path, progress=None) -> dict:
             del new_state[rel]
 
     _save_state(config, new_state)
+    # 同步重建笔记目录（catalog）：确定性路由地图，chat 启动时注入 prompt。
+    # 目录重建失败不阻塞索引主流程。
+    catalog.rebuild_catalog(config, notes_dir, md_files)
     return stats
 
 
