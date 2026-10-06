@@ -91,6 +91,7 @@ INSTRUCTIONS = """你是用户的私人管家——也是秘书和朋友。你�
 
 ## 工具准则
 - file_read 可以读取技能（SKILL.md）和规则文件——看到索引里匹配的技能/规则就先读再行动
+- 查看或修改管家自身源代码时：先从代码库索引定位负责的模块，再用 file_read 精读，不要逐文件漫游
 - 查实时信息、外部知识、新闻、资料时用 web_search；拿到具体 URL 后用 web_fetch 读全文。引用联网信息时标注来源链接
 - shell 和 run_python 会请求用户确认，说明你要做什么
 - 工具报错时读懂错误信息再修正重试，不要盲目重复
@@ -118,6 +119,8 @@ class AlfredDeps:
     rules_text: str = ""
     # 笔记目录：ingest 生成的确定性路由地图（operator-memory catalog 思想）
     notes_catalog: str = ""
+    # 代码库索引：宿主按源码 mtime 生成的模块地图（operator-memory project index 思想）
+    codebase_index: str = ""
 
 
 # 单轮工具调用硬上限
@@ -332,6 +335,10 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
     @agent.system_prompt
     def inject_notes_catalog(ctx: RunContext[AlfredDeps]) -> str:
         return ctx.deps.notes_catalog
+
+    @agent.system_prompt
+    def inject_codebase_index(ctx: RunContext[AlfredDeps]) -> str:
+        return ctx.deps.codebase_index
 
     # ── ③ 动态层：规则、日期（易变信息放最后）──────────────────
 
@@ -811,6 +818,7 @@ def chat_turn_stream(
         lessons_text=deps.lessons_text,
         rules_text=deps.rules_text,
         notes_catalog=deps.notes_catalog,
+        codebase_index=deps.codebase_index,
     )
 
     error_holder: list[Exception] = []

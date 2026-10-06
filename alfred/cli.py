@@ -454,6 +454,9 @@ def chat(
     # 笔记目录：ingest 生成的确定性路由地图（不存在时为空串，不注入）
     from .knowledge.catalog import load_catalog as _load_notes_catalog
     _notes_catalog = _load_notes_catalog(config)
+    # 代码库索引：宿主按源码 mtime 自动重建（operator-memory project index 思想）
+    from .codebase_index import ensure_index as _ensure_codebase_index
+    _codebase_index = _ensure_codebase_index(config)
     deps = AlfredDeps(
         config=config,
         blocks=blocks,
@@ -462,6 +465,7 @@ def chat(
         lessons_text=_lessons_text,
         rules_text=_rules_text,
         notes_catalog=_notes_catalog,
+        codebase_index=_codebase_index,
     )
     logger = _setup_chat_logger(config, debug=debug)
 
