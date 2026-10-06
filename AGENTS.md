@@ -100,6 +100,7 @@ Alfred/
 │   ├── titles.py           # 自动会话标题：首轮后后台概括（≤15 字）
 │   ├── compaction.py       # 上下文压缩：丢内容留指针 + 偏好优先
 │   ├── codewriting.py      # 自举进化：code_patch 三重门禁（路径/语法/测试）
+│   ├── codebase_index.py   # 代码库活索引：ast 提取模块 docstring，按 mtime 失效重建
 │   ├── backup.py           # 数据备份：打包 config/.env/data/rules + 项目外 skills/rules 目录为 zip
 │   │
 │   ├── memory/             # 记忆层（agent 对用户的认知）
@@ -116,7 +117,8 @@ Alfred/
 │   │   ├── chunking.py     # Markdown 标题层级切分 + frontmatter
 │   │   ├── embed.py        # 本地/云端 embedding 模型封装
 │   │   ├── store.py        # LanceDB 向量存储（notes/frameworks/episodes）
-│   │   ├── ingest.py       # 笔记增量索引管线
+│   │   ├── ingest.py       # 笔记增量索引管线（结束后重建 notes catalog）
+│   │   ├── catalog.py      # 笔记目录：标题/摘要/「何时读」路由表，确定性注入（operator-memory catalog 思想）
 │   │   └── feed.py         # 喂书管线：分段通读 → 框架卡片 → 入库校验
 │   │
 │   ├── skills/             # skill 加载器 + 内置 skill
@@ -192,7 +194,7 @@ Alfred/
 - 所有 Rich Console 输出集中在主线程渲染，避免与后台 agent 线程竞争；用户确认回调 `_confirm` 用原生 `print/input` 实现以降低线程安全风险
 - chat 日志通过 `_setup_chat_logger` 写入 `data/logs/alfred.log`（RotatingFileHandler，5MB×3），`--debug` 时同时输出到控制台；记录会话开始/结束、每轮输入/回复长度、工具调用、异常堆栈
 - 静默退出探针（`_install_exit_probes`）：chat 启动时布设 `atexit` + `sys.excepthook` + `threading.excepthook` + `faulthandler`（写 `data/logs/alfred_crash.log`）。排查"进程无声消失"时按日志判别：有「会话结束」=正常退出；有「atexit 触发」无「会话结束」=绕过主循环的干净收尾（疑似 SystemExit）；有「未捕获异常」=异常逃逸；`alfred_crash.log` 非空=原生崩溃；全无=外部强杀（终端被关/taskkill）
-- `/status`：在对话内检查当前 chat 模型与 embedding 的连接状态
+- `/status`：在对话内检查当前 chat 模型、embedding 与记忆层的连接状态（记忆层只读缓存报告，不触发懒加载初始化）
 - `/lessons`：查看 RefleXion 教训库，支持按类别过滤（如 `/lessons code-debug`）
 
 ### Agent 内核（`alfred/agent.py`）
@@ -203,11 +205,15 @@ Alfred/
 - `AlfredDeps`：运行时依赖对象（config、blocks、confirm 回调、本轮召回记录、session_id、bus、tool_call_count）
 
 **System prompt 四层顺序（KV-cache 纪律，不可随意调整）：**
-1. 静态层：`INSTRUCTIONS`（人格/行为准则/工具准则）
+1. 静态层：`INSTRUCTIONS`（人格/行为准则/记忆感知工作流/指令冲突仲裁/工具准则）
 2. 半静态层：`persona` 块 + `human` 块（`inject_persona`、`inject_human`）
 3. 半动态层：`lessons` 块（`inject_lessons`）—— RefleXion 教训，随对话积累自动更新
-4. 静态缓存层：`skill_index` + `lessons_text`（build_agent 时一次性预加载，避免每轮 I/O）
+4. 静态缓存层：`skill_index` + `lessons_text` + `notes_catalog` + `codebase_index`（build_agent 时一次性预加载，避免每轮 I/O；后两者缺失时为空串不注入）
 5. 动态层：常驻规则 + 可召回规则索引 + 当前日期（`inject_rules`、`inject_date`）
+
+**INSTRUCTIONS 的两个行为纪律（借鉴 operator-memory）：**
+- **记忆感知工作流（consult → build → update）**：先查脑（memory_search / 笔记目录 / frameworks_search / episodes_search），再干活，后更新脑（memory_update_block / save_episode）。写成第一义务而非仅靠工具存在
+- **指令冲突仲裁**：用户当轮指令 > 常驻规则（alwaysApply）> human/persona 记忆块 > 技能与可召回规则建议；冲突时高层级优先并说明放弃的低层级依据
 
 **恒定工具集（`agent.py` 中注册，共 19 个）：**
 - `memory_search`：长期记忆召回（混合相关性 + 近因排序）。召回结果累加进 `deps.last_recalled`（`extend`，不是重新绑定），一轮内多次召回都要能被 `/why` 看到；`chat_turn_stream` 每轮用新的空列表建 `turn_deps`，轮间不串
@@ -253,14 +259,15 @@ Alfred/
 **长期记忆：**
 - `longterm.py`：记忆客户端工厂（用户级懒加载单例），按 `config.memory.provider` 分发到不同 MemoryClient 实现；`add_async`/`search`/`list_all`/`delete` 均支持 `user_id` 参数，用于多 agent 共享时的租户隔离
 - 琐碎消息过滤：用户/助手消息 strip 后 < 20 字符或匹配 `^是$`/`^嗯`/`^ok` 等模式则跳过，不送入 mem0
-- 初始化失败降级：client 创建失败时标记 `_init_failed`，后续操作空执行，不阻塞对话
+- 初始化失败降级但**可见**（借鉴 operator-memory 的 Failure Is Visible）：client 创建失败时标记 `_init_failed` 并记录 `_init_error`（异常类型+消息），后续操作空执行，不阻塞对话；`init_status()` 暴露失败原因给 `/status` 与 memory_search（离线时返回明确诊断而不是伪装成"没有记忆"），`peek_client()` 只读缓存供诊断视图使用（不触发懒加载）
+- 事实型记忆写入前去重：`add_fact()` 先检索近邻，字符/词集合 Jaccard ≥ 0.85 判定为同一事实的重复表述则跳过（阈值校准：「喜欢喝冰咖啡」vs「喜欢喝咖啡」= 0.875 应去重；「每周三打球」vs「每周四打球」= 0.8 必须保留）；检索失败不阻塞写入（mem0 内部 ADD/UPDATE/DELETE 推断兜底）
 
 **召回与情景：**
 - `recall.py`：混合召回入口，按 `recall_budget` 硬预算截断，融合相关性（0.7）+ 近因（0.3）排序。`_parse_ts` 必须能解析 mem0 的无时区 ISO 时间戳（`2026-08-30T15:16:00`），否则近因度恒为 0.5、0.3 的权重形同虚设；`score` 为 0.0 是合法低分，判断缺省要用 `m.get(...) is None` 而非 `or`
 - `episodic.py`：情景记忆四元组（场景/思路/行动/结果），存 LanceDB `episodes` 表，`search_episodes` 支持语义检索
 
 **整理：**
-- `consolidate.py`：sleep-time 整理，产出六类草稿（memory_entries / human_block_update / rule_suggestions / stale_memories / lessons / episodes）；`apply_drafts` 逐项确认后入库（含 episodes，交互模式与无人值守模式的写入路径必须一致，否则 LLM 产出的情景记忆在交互模式下被静默丢弃）；`apply_unattended` 无人值守模式**自动写入** lessons + memory_entries + episodes（用户事实沉淀和情景记忆四元组均为低风险 ADD-only 操作），human_block_update 按改动大小（≤500 字符自动写，超阈值降级 pending），rule_suggestions / stale_memories 始终待审。大幅 human 更新与待审项写入 `data/history/consolidate_pending.jsonl` 供 `/consolidate-review` 查看
+- `consolidate.py`：sleep-time 整理，产出六类草稿（memory_entries / human_block_update / rule_suggestions / stale_memories / lessons / episodes）；`apply_drafts` 逐项确认后入库（含 episodes，交互模式与无人值守模式的写入路径必须一致，否则 LLM 产出的情景记忆在交互模式下被静默丢弃）；memory_entries 两条写入路径统一走 `longterm.add_fact()`（近重复去重，已存在的条目标记「已存在，跳过」）；`apply_unattended` 无人值守模式**自动写入** lessons + memory_entries + episodes
 - `_apply_user_facts_to_human`：把 memory_entries 中的纯用户事实晋升到 human 块（对齐 Rethinking Memory 的 Updating operation）。章节头只出现一次，空间不足时贪心装入能装下的条目并返回 `[跳过: ...]`，不整批放弃
 - `consolidate_state.py`：append-only JSONL 追踪对话轮数与最近复盘时间；`should_auto_consolidate()` 在 `chat` 退出时判断是否自动触发无人值守 consolidate（阈值：≥3 轮且距上次复盘 >24 小时），后台线程执行不阻塞退出
 - `audit.py`：记忆审计视图（`alfred audit` / `/audit`），诊断记忆库健康度、工具调用成功率、冷笔记、死规则、过期目标。`days` 时间窗必须贯穿全报告——工具调用统计与 `total_turns` 用同一个 `cutoff`，否则同一份报告里成功率是终身统计、轮数却是近期统计
@@ -283,7 +290,8 @@ Alfred/
 - `chunking.py`：按 Markdown 标题层级切分，保留标题路径前缀，解析 frontmatter
 - `embed.py`：embedding 模型封装，支持本地 sentence-transformers 和云端 OpenAI 兼容 API；query 带 instruction 前缀
 - `store.py`：LanceDB 表操作（`notes`、`frameworks`、`episodes`）
-- `ingest.py`：增量索引 Markdown 目录（文件 hash 判断变更）
+- `ingest.py`：增量索引 Markdown 目录（文件 hash 判断变更），结束后自动重建笔记目录（catalog 失败不阻塞主流程）
+- `catalog.py`：笔记目录生成与加载（operator-memory catalog 思想）。条目为纯机械抽取（frontmatter title > 首个 H1 > 文件名；摘要=首个非标题段落 ≤120 字符；「何时读」= H1-H3 标题词 ≤5 个，无标题回退文件名），零 LLM；渲染封顶 `MAX_ENTRIES=100` 篇控制 prompt 预算，超出提示用 notes_search 兜底；存储于 `data/vectordb/notes_catalog.md`
 - `feed.py`：喂书管线，分段提炼框架卡片，四要素校验后入库
 
 ### 配置与模型（`alfred/config.py`、`alfred/llm.py`）
@@ -332,6 +340,10 @@ python -m pytest tests/ -q
 - `test_history_tool_calls.py`：工具调用记录持久化
 - `test_llm.py`：LLM 连接测试与错误映射
 - `test_backup.py`：备份打包内容、排除项（.lock/__pycache__）、默认输出路径、项目内 rules 目录不重复进 external/
+- `test_memory_visibility.py`：记忆层失败可见化（init_status/peek_client、memory_search 离线诊断）
+- `test_memory_dedup.py`：add_fact 写入前去重（Jaccard 阈值校准、离线/检索失败路径、consolidate 集成）
+- `test_notes_catalog.py`：笔记目录条目抽取、渲染封顶、ingest 集成与失败容错
+- `test_codebase_index.py`：代码库索引 docstring 抽取、__pycache__ 跳过、mtime 失效重建
 
 **约束**：测试不依赖真实 LLM 调用、不下载 embedding 模型、不访问外部 API。
 
@@ -397,7 +409,7 @@ data/
 ## 常见坑点
 
 - **换 embedding 模型必须重建索引**：`models.embed.name` 一旦确定不要轻易更换，否则 notes/frameworks/episodes 向量库需要全量重建。
-- **mem0 初始化失败会静默降级**：`longterm.py` 初始化失败会标记 `_init_failed`，后续记忆写入/召回都为空操作，不会阻塞对话。常见原因是 Qdrant 本地存储残留 `.lock` 文件（异常退出导致），`get_client` 已支持自动清理锁文件并重试一次。
+- **mem0 初始化失败降级但可见**：`longterm.py` 初始化失败会标记 `_init_failed` 并记录 `_init_error`，后续记忆写入/召回空执行，不阻塞对话；但失败不再是静默的——`memory_search` 在召回为空且确认离线时返回明确诊断，`/status` 显示记忆层状态（`init_status()` / `peek_client()`，后者只读缓存不触发懒加载）。常见原因是 Qdrant 本地存储残留 `.lock` 文件（异常退出导致），`get_client` 已支持自动清理锁文件并重试一次。
 - **mem0 Qdrant 锁文件残留**：如果 `alfred memory list` 长期为空且对话看似有记忆（实际是会话历史），检查 `data/vectordb/qdrant_mem0/.lock` 是否存在。`get_client` 会自动清理，若仍失败可手动删除该文件后重启。
 - **consolidate 把元数据文件当会话读崩**：`consolidate_state.jsonl` / `consolidate_pending.jsonl` 与会话 JSONL 同目录，`list_sessions` 曾用裸 `*.jsonl` glob 把元数据文件列入，导致 `Message(**record)` 遇未知字段（如 `drafts`）抛 TypeError，`alfred consolidate` 与自动复盘必崩。已在 `history.py` 排除这两个文件名；**新增会话目录内 JSONL 类型时同步更新排除清单**。
 - **persona 和 human 修改都需要用户确认**：agent 调用 `memory_update_block(name="persona")` 或 `memory_update_block(name="human")` 时，若 `deps.confirm` 返回 False 则写入被拒绝。
