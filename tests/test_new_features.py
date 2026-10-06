@@ -108,18 +108,13 @@ def test_user_facts_header_reused_and_greedy_pack(tmp_path):
 
 def test_apply_unattended_writes_memory_and_lessons_and_episodes(tmp_path, monkeypatch):
     """apply_unattended 在无人值守模式下应自动写入 lessons / memory_entries / episodes。"""
-    # mock longterm
-    class MockMemory:
-        def __init__(self):
-            self.added = []
-        def add(self, msgs, user_id):
-            self.added.extend(msgs)
-
-    _mock_mem = MockMemory()
+    # memory_entries 写入走 longterm.add_fact（带去重门禁），这里 mock 到该层
+    _added: list[str] = []
     _mock_eps = []
 
-    def fake_get_memory(cfg):
-        return _mock_mem
+    def fake_add_fact(cfg, text, user_id=None):
+        _added.append(text)
+        return {"status": "added"}
 
     def fake_save_ep(cfg, ep):
         _mock_eps.append({
@@ -130,7 +125,7 @@ def test_apply_unattended_writes_memory_and_lessons_and_episodes(tmp_path, monke
 
     from alfred.memory import consolidate, episodic, longterm
 
-    monkeypatch.setattr(longterm, "get_memory", fake_get_memory)
+    monkeypatch.setattr(longterm, "add_fact", fake_add_fact)
     monkeypatch.setattr(episodic, "save_episode", fake_save_ep)
 
     cfg = Config(memory={"dir": str(tmp_path / "mem")})
@@ -148,7 +143,7 @@ def test_apply_unattended_writes_memory_and_lessons_and_episodes(tmp_path, monke
     assert any("RefleXion" in a for a in applied)
     # memory_entries 自动写入
     assert any("记忆条目" in a for a in applied)
-    assert len(_mock_mem.added) == 2
+    assert _added == ["user likes tea", "user lives in beijing"]
     # episodes 自动写入
     assert any("情景记忆" in a for a in applied)
     assert len(_mock_eps) == 1
