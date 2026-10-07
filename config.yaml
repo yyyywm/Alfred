@@ -83,8 +83,8 @@ paths:
 
 # 联网工具（web_search / web_fetch）
 web:
-  search_provider: bing       # bing=免 key 爬搜索结果；tavily=结构化 API（更稳定，需 .env 配 TAVILY_API_KEY）
-  # search_env_key: TAVILY_API_KEY
+  search_provider: tavily       # bing=免 key 爬搜索结果；tavily=结构化 API（更稳定，需 .env 配 TAVILY_API_KEY）
+  search_env_key: TAVILY_API_KEY
   # search_max_results: 5     # 每次搜索返回条数
   # fetch_max_chars: 4000     # web_fetch 正文截断上限
   # timeout_s: 30             # 联网请求超时
