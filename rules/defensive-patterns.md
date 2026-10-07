@@ -58,3 +58,15 @@ alwaysApply: false
   判断永远为 False，静默 skip 掉该处理的表。
 **规则**：判断表是否存在用 `try: db.open_table(name) except: ...`，
   不要依赖 list_tables()/table_names() 的返回结构。
+
+## 11. Notion API 移动页面必须用 POST /v1/pages/{id}/move，PATCH parent 会被静默忽略
+**来源**：2026-09-13 整理 Notion 分类时，`pages.update(parent=...)` 返回 200 但父级纹丝不动，
+  差点误判成"移动成功"。
+**规则**：改页面父级用 `n.request(path='pages/{id}/move', method='post', body={'parent':{'type':'page_id','page_id':...}})`；
+  任何"静默成功"的写操作，必须重新 retrieve 验证目标字段真的变了再报成功。
+
+## 12. ntn CLI 间歇性 403（拉 OpenAPI spec 失败）用 NOTION_API_VERSION 环境变量绕过
+**来源**：2026-09-24 周同步时 ntn 报 'Failed to fetch OpenAPI spec: 403 Forbidden'，
+  同一会话内时好时坏（首次能跑，重试全挂）。
+**规则**：跑 notion_sync.py 前先 `set NOTION_API_VERSION=2022-06-28`，
+  跳过 ntn 动态拉 spec 的步骤；定时任务 prompt 里已写入此回退方案。
