@@ -77,6 +77,42 @@ def test_add_fact_skips_near_duplicate(monkeypatch):
     assert client.added == []  # 没有写入
 
 
+def test_add_fact_vector_score_catches_rewritten_duplicates(monkeypatch):
+    """mem0 抽取会把中文事实改写成英文存储，文本 Jaccard 失效；
+    向量分 ≥ 0.85 兜底判重（真实链路校准：同义复述 ≥ 0.91）。"""
+    client = FakeClient(neighbors=[{
+        "memory": "User enjoys pour-over coffee and prefers light roast",
+        "score": 0.91,
+    }])
+    cfg = _use_client(monkeypatch, client)
+
+    result = longterm.add_fact(cfg, "用户喜欢喝手冲咖啡，偏好浅烘豆")
+    assert result["status"] == "duplicate"
+    assert client.added == []
+
+
+def test_add_fact_vector_score_below_threshold_keeps_distinct_facts(monkeypatch):
+    """向量分 0.73 的近义异事实（喜欢美式 vs 喜欢手冲）不能误杀。"""
+    client = FakeClient(neighbors=[{
+        "memory": "用户喜欢喝手冲咖啡",
+        "score": 0.73,
+    }])
+    cfg = _use_client(monkeypatch, client)
+
+    result = longterm.add_fact(cfg, "用户喜欢喝美式咖啡")
+    assert result["status"] == "added"
+    assert client.added == ["用户喜欢喝美式咖啡"]
+
+
+def test_add_fact_missing_score_falls_back_to_text(monkeypatch):
+    """协议不保证 score 字段：缺失时只靠文本信号，低相似文本正常写入。"""
+    client = FakeClient(neighbors=[{"memory": "User enjoys coffee"}])  # 无 score
+    cfg = _use_client(monkeypatch, client)
+
+    result = longterm.add_fact(cfg, "用户喜欢喝咖啡")
+    assert result["status"] == "added"
+
+
 def test_add_fact_writes_when_no_duplicate(monkeypatch):
     """邻居相似度不足时正常写入。"""
     client = FakeClient(neighbors=[{"memory": "用户在深圳工作"}])
