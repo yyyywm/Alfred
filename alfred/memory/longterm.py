@@ -247,10 +247,15 @@ def delete(config: Config, memory_id: str, user_id: str | None = None) -> bool:
 # 绕过语义阈值不断累积。写入前做一次确定性去重：相似度足够高就跳过，
 # 保持"一个事实一份记录"。
 
-# 字符/词集合 Jaccard 相似度阈值：≥ 0.85 视为同一事实的重复表述。
-# 校准依据：「用户喜欢喝冰咖啡」vs「用户喜欢喝咖啡」= 0.875（应去重）；
-# 「每周三打羽毛球」vs「每周四打羽毛球」= 0.8（真不同事实，必须保留）。
+# 双信号判重（2026-10-07 真实链路校准，bge-m3）：
+# 1. 字符/词集合 Jaccard ≥ 0.85：同语言近重复（「喜欢喝冰咖啡」vs
+#    「喜欢喝咖啡」= 0.875 应去重；「周三打球」vs「周四打球」= 0.8 必须保留）。
+# 2. 向量分 ≥ 0.85：mem0 抽取会把中文事实改写成英文存储，文本信号失效；
+#    向量分实测区分度：同义复述 ≥ 0.91，异事实（美式咖啡/喝茶）≤ 0.73。
+# 已知局限：跨语言同义（中文 vs 英译库存）向量分约 0.78，落在两个阈值
+# 之间会漏判——由 mem0 内部 UPDATE 推断兜底，不追求完备。
 _DUP_SIMILARITY_THRESHOLD = 0.85
+_DUP_VECTOR_THRESHOLD = 0.85
 _DUP_SEARCH_LIMIT = 5
 
 
@@ -275,6 +280,21 @@ def is_near_duplicate(text_a: str, text_b: str,
     return _jaccard(_text_signature(text_a), _text_signature(text_b)) >= threshold
 
 
+def _is_dup_neighbor(text: str, neighbor: dict) -> bool:
+    """近邻是否构成重复：文本 Jaccard 或向量分任一达到阈值。
+
+    向量分覆盖 mem0 抽取改写（中文事实被存成英文）导致文本信号失效
+    的场景；score 缺失（协议不保证）时只靠文本信号。
+    """
+    existing = neighbor.get("memory") or neighbor.get("text") or ""
+    if not existing:
+        return False
+    if is_near_duplicate(text, existing):
+        return True
+    score = neighbor.get("score")
+    return score is not None and float(score) >= _DUP_VECTOR_THRESHOLD
+
+
 def add_fact(config: Config, text: str, user_id: str | None = None) -> dict:
     """写入一条事实型记忆，写入前做近重复去重。
 
@@ -292,8 +312,8 @@ def add_fact(config: Config, text: str, user_id: str | None = None) -> dict:
     except Exception:
         neighbors = []  # 检索失败不阻塞写入；mem0 内部推断兜底
     for m in neighbors:
-        existing = m.get("memory") or m.get("text") or ""
-        if existing and is_near_duplicate(text, existing):
-            return {"status": "duplicate", "existing": existing}
+        if _is_dup_neighbor(text, m):
+            return {"status": "duplicate",
+                    "existing": m.get("memory") or m.get("text")}
     client.add([{"role": "user", "content": text}], user_id=uid)
     return {"status": "added"}
