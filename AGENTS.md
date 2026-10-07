@@ -260,7 +260,7 @@ Alfred/
 - `longterm.py`：记忆客户端工厂（用户级懒加载单例），按 `config.memory.provider` 分发到不同 MemoryClient 实现；`add_async`/`search`/`list_all`/`delete` 均支持 `user_id` 参数，用于多 agent 共享时的租户隔离
 - 琐碎消息过滤：用户/助手消息 strip 后 < 20 字符或匹配 `^是$`/`^嗯`/`^ok` 等模式则跳过，不送入 mem0
 - 初始化失败降级但**可见**（借鉴 operator-memory 的 Failure Is Visible）：client 创建失败时标记 `_init_failed` 并记录 `_init_error`（异常类型+消息），后续操作空执行，不阻塞对话；`init_status()` 暴露失败原因给 `/status` 与 memory_search（离线时返回明确诊断而不是伪装成"没有记忆"），`peek_client()` 只读缓存供诊断视图使用（不触发懒加载）
-- 事实型记忆写入前去重：`add_fact()` 先检索近邻，字符/词集合 Jaccard ≥ 0.85 判定为同一事实的重复表述则跳过（阈值校准：「喜欢喝冰咖啡」vs「喜欢喝咖啡」= 0.875 应去重；「每周三打球」vs「每周四打球」= 0.8 必须保留）；检索失败不阻塞写入（mem0 内部 ADD/UPDATE/DELETE 推断兜底）
+- 事实型记忆写入前去重：`add_fact()` 先检索近邻，双信号判重——文本字符/词集合 Jaccard ≥ 0.85（同语言近重复）或向量分 ≥ 0.85（覆盖 mem0 把中文事实改写成英文存储导致文本信号失效的场景；2026-10-07 真实链路校准：同义复述 ≥ 0.91，异事实 ≤ 0.73）；已知局限：跨语言同义向量分约 0.78 会漏判，由 mem0 内部 UPDATE 推断兜底；检索失败不阻塞写入
 
 **召回与情景：**
 - `recall.py`：混合召回入口，按 `recall_budget` 硬预算截断，融合相关性（0.7）+ 近因（0.3）排序。`_parse_ts` 必须能解析 mem0 的无时区 ISO 时间戳（`2026-08-30T15:16:00`），否则近因度恒为 0.5、0.3 的权重形同虚设；`score` 为 0.0 是合法低分，判断缺省要用 `m.get(...) is None` 而非 `or`
