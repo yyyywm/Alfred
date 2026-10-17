@@ -1,4 +1,9 @@
-"""CLI 入口：alfred chat / ingest / feed / consolidate / memory / models / skills。
+"""CLI 入口：alfred chat / ingest / feed / consolidate / memory / models / skills / sync。
+
+sync 子命令（双机记忆同步，详见 sync.py 模块文档）：
+  alfred sync push [--force]  推送本地记忆到服务器中转仓库（护栏防覆盖，不自动合并）
+  alfred sync pull            拉取服务器快照覆盖本地（自动备份本地数据）
+  alfred sync status          查看服务器上最近一次推送的机器与时间
 
 chat 内斜杠命令：
   /exit 退出  /new 新会话  /model <provider:model> 切换闲聊模型
