@@ -155,8 +155,8 @@ class PushBlocked(SyncError):
 def _check_push_guard(config: Config, force: bool) -> None:
     """push 护栏：发现另一台机器的更新快照时拦截，交给用户决定。
 
-    放行条件：远端标记来自本机（无分叉可能），或本地 marker 时间不早于
-    远端（本地基于最新快照）；其余一律 PushBlocked，--force 可跳过。
+    放行条件：远端标记来自本机（无分叉可能），或本地 marker 与远端标识一致
+    （本地基于该快照）；其余一律 PushBlocked，--force 可跳过。
     注意：护栏只拦截+提示，不做任何自动合并——先 pull / 强推 / 取消
     由用户当场选择。
     """
@@ -172,8 +172,9 @@ def _check_push_guard(config: Config, force: bool) -> None:
             local = json.loads(local_file.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             local = None
-    # ISO 时间字符串同格式下字典序即时间序（两台机器各自本地时区）
-    if local and local.get("time", "") >= remote.get("time", ""):
+    if isinstance(local, dict) and all(
+        local.get(key) == remote.get(key) for key in ("host", "time")
+    ):
         return
     if force:
         console.print("[yellow]--force：跳过护栏，远端快照将退到 previous/。[/yellow]")
