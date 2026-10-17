@@ -20,12 +20,32 @@ def _cp(returncode: int = 0, stdout: bytes = b"", stderr: bytes = b""):
     )
 
 
-@pytest.mark.parametrize("remote_dir", ["", "/", "////", "/.", "/tmp/.."])
-def test_remote_dir_rejects_empty_or_root(remote_dir):
+@pytest.mark.parametrize(
+    "remote_dir",
+    [
+        "", "/", "////", "/.", "/tmp/..", "~", "~/..", "~/foo/..",
+        "~/../outside", ".", "foo/..", "..", "../outside",
+    ],
+)
+def test_remote_dir_rejects_unsafe_directory(remote_dir):
     cfg = Config(sync=SyncConfig(host="user@server", remote_dir=remote_dir))
 
     with pytest.raises(sync.SyncError, match="独立目录"):
         sync._remote_dir(cfg)
+
+
+@pytest.mark.parametrize(
+    ("remote_dir", "expected"),
+    [
+        ("~/alfred-sync", '"$HOME"/alfred-sync'),
+        ("~/foo/../bar", '"$HOME"/bar'),
+        ("/var/lib/alfred-sync", "/var/lib/alfred-sync"),
+    ],
+)
+def test_remote_dir_accepts_independent_directory(remote_dir, expected):
+    cfg = Config(sync=SyncConfig(host="user@server", remote_dir=remote_dir))
+
+    assert sync._remote_dir(cfg) == expected
 
 
 def test_fetch_marker_returns_none_for_confirmed_absence(monkeypatch):
