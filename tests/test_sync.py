@@ -90,6 +90,18 @@ def test_push_guard_allows_pulled_remote(monkeypatch, tmp_path):
     sync._check_push_guard(_cfg(), force=False)
 
 
+def test_push_guard_blocks_different_snapshot_even_with_later_time(monkeypatch, tmp_path):
+    remote = {"host": "other-machine", "time": "2026-10-17T22:00:00"}
+    local = {"host": "local-machine", "time": "2099-01-01T00:00:00"}
+    (tmp_path / sync._MARKER).write_text(json.dumps(local), encoding="utf-8")
+    monkeypatch.setattr(sync, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(sync.platform, "node", lambda: "local-machine")
+    monkeypatch.setattr(sync, "_fetch_marker", lambda config: remote)
+
+    with pytest.raises(sync.PushBlocked):
+        sync._check_push_guard(_cfg(), force=False)
+
+
 def test_push_guard_does_not_swallow_status_errors(monkeypatch):
     def fail_fetch(config):
         raise sync.SyncError("SSH unavailable")
