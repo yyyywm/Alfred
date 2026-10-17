@@ -77,6 +77,11 @@ alfred frameworks <query>
 
 # 一键备份全部数据（含 .env 与技能目录），供迁移到其他机器
 alfred backup [-o <输出路径>]
+
+# 双机记忆同步（服务器仅做 SSH 文件中转；纪律：换机器前 push，到新机器先 pull）
+alfred sync push [--force]   # 推送本地记忆；护栏检测到他机更新快照时拦截，交用户选择
+alfred sync pull             # 拉取服务器快照覆盖本地（自动备份本地数据）
+alfred sync status           # 查看服务器上次推送的机器/时间
 ```
 
 ## 项目结构
@@ -102,6 +107,7 @@ Alfred/
 │   ├── codewriting.py      # 自举进化：code_patch 三重门禁（路径/语法/测试）
 │   ├── codebase_index.py   # 代码库活索引：ast 提取模块 docstring，按 mtime 失效重建
 │   ├── backup.py           # 数据备份：打包 config/.env/data/rules + 项目外 skills/rules 目录为 zip
+│   ├── sync.py             # 双机记忆同步：tarfile 经 SSH 与服务器中转仓库互传 + push 护栏
 │   │
 │   ├── memory/             # 记忆层（agent 对用户的认知）
 │   │   ├── protocols.py    # MemoryClient / EmbeddingClient 协议接口
@@ -185,7 +191,8 @@ Alfred/
 ## 代码组织与模块职责
 
 ### CLI（`alfred/cli.py`）
-- 所有用户命令入口：`chat`、`ingest`、`feed`、`frameworks`、`consolidate`、`memory`、`skills`、`models`、`backup`
+- 所有用户命令入口：`chat`、`ingest`、`feed`、`frameworks`、`consolidate`、`memory`、`skills`、`models`、`backup`、`sync`
+- `sync`：双机记忆同步（`alfred/sync.py`）。tarfile 流式打包经 SSH 与服务器中转仓库互传（current/previous 原子轮换），不依赖系统 tar/rsync；push 护栏：服务器是另一台机器的更新快照且本地未拉取时拦截，交用户选择 先pull/强推/取消，不做自动合并；pull 前自动备份本地；排除 `.lock`/`__pycache__`；配置见 config.yaml `sync` 段
 - `backup`：一键打包全部数据（`config.yaml`/`.env`/`rules`/`data`/`hist` + 项目外 skills/rules 目录，见 `backup.py`）为 zip，含 RESTORE.md 恢复说明；默认输出 `backups/alfred-backup-<时间戳>.zip`（已 gitignore）；排除 `.lock`/`__pycache__`；备份含 .env 明文 key，需提醒用户妥善保管
 - `chat` 内支持斜杠命令：`/exit`、`/new`、`/model`、`/remember`、`/memory`、`/why`、`/sessions`、`/load`、`/delete`、`/title`、`/lessons`、`/status`、`/tools`、`/whoami`、`/trust`、`/consolidate`、`/consolidate-review`、`/audit`、`/help`
 - `/tools`：列出 agent 对象上实际注册的工具（ground truth）。模型自称的工具清单不可靠——它无法真正内省注册表，且会被会话历史中自己之前的断言锚定/编造（曾出现旧会话里模型坚称"只有记忆工具"、甚至编出不存在的工具名的情况）；排查"工具调不了"时以 `/tools` 输出为准，再用直接指令（"调用 web_search 搜索 X"）验证实际调用
