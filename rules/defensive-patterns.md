@@ -70,3 +70,10 @@ alwaysApply: false
   同一会话内时好时坏（首次能跑，重试全挂）。
 **规则**：跑 notion_sync.py 前先 `set NOTION_API_VERSION=2022-06-28`，
   跳过 ntn 动态拉 spec 的步骤；定时任务 prompt 里已写入此回退方案。
+
+## 13. 提交前必查 diff 里的敏感信息；服务器地址等敏感配置只走 .env
+**来源**：2026-10-17 sync 功能提交时，用户已填入真实服务器 IP 的 config.yaml
+  被一起 commit 并 push 到公开 GitHub 仓库，被迫重写历史 + force push 清除。
+**规则**：任何 `git commit` 前先 `git diff --staged` 扫一遍 IP/key/密码/内网地址；
+  敏感配置（服务器地址、密钥路径等）代码里必须支持从 .env 读取
+  （如 ALFRED_SYNC_HOST），config.yaml 只留空模板 + 注释指引。
