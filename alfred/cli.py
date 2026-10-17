@@ -102,8 +102,8 @@ def sync_push(
 ) -> None:
     """把本地记忆推送到服务器中转仓库（换机器前执行）。
 
-    若服务器上是另一台机器的更新快照而本地未拉取，护栏会拦截并让你
-    当场选择：先 pull 再 push / 强制 push / 取消。不做自动合并。
+    若本地尚未拉取服务器当前快照，护栏会拦截并让你当场选择：
+    先 pull 再 push / 强制 push / 取消。不做自动合并。
     """
     from . import sync as _sync
     cfg = load_config()
@@ -116,7 +116,7 @@ def sync_push(
             f"在 {r.get('time', '?')} 推送的，你本地没有拉过这份数据。[/yellow]"
         )
         console.print(
-            "直接 push 会覆盖对方的新记忆（退到 previous/，只能救回一代）。"
+            "直接 push 会覆盖远端的新记忆（退到 previous/，只能救回一代）。"
         )
         choice = typer.prompt(
             "选择：[p] 先 pull 再 push（推荐）/ [f] 强制 push / [c] 取消",
