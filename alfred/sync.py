@@ -8,8 +8,8 @@
       previous/           上一次推送的快照（拉错可人工回滚）
       （last_sync.json 在 current/ 内：记录推送机器与时间）
 
-传输：Python tarfile 流式打包 → ssh stdin；不依赖系统 tar/rsync，
-Windows 10+ 与 macOS 自带 OpenSSH 客户端即可，零新依赖。
+传输：本地用 Python tarfile 打包 → ssh stdin；本地不依赖系统 tar/rsync，
+Windows 10+ 与 macOS 自带 OpenSSH 客户端即可，零新 Python 依赖；远端需支持 tar。
 
 纪律（顺序使用场景）：换机器前 push，到新机器先 pull 再聊；
 同步时另一台的 Alfred 必须关闭（Qdrant/LanceDB 数据库文件不能两边同时写）。
