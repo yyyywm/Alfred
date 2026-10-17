@@ -38,7 +38,8 @@ def test_fetch_marker_returns_none_for_confirmed_absence(monkeypatch):
     monkeypatch.setattr(sync.subprocess, "run", fake_run)
 
     assert sync._fetch_marker(_cfg()) is None
-    assert calls[0][-1].startswith("if [ -f ")
+    assert calls[0][-1].startswith("if [ -d ")
+    assert "/previous" in calls[0][-1]
 
 
 def test_fetch_marker_raises_on_ssh_failure(monkeypatch):
@@ -78,10 +79,31 @@ def test_fetch_marker_rejects_invalid_marker(monkeypatch, payload):
         sync._fetch_marker(_cfg())
 
 
+def test_fetch_marker_rejects_missing_marker_in_existing_snapshot(monkeypatch):
+    monkeypatch.setattr(
+        sync.subprocess,
+        "run",
+        lambda *args, **kwargs: _cp(stdout=sync._INVALID_MARKER.encode()),
+    )
+
+    with pytest.raises(sync.SyncError, match="缺失或为空"):
+        sync._fetch_marker(_cfg())
+
+
 def test_push_guard_blocks_unpulled_remote(monkeypatch, tmp_path):
     remote = {"host": "other-machine", "time": "2026-10-17T22:00:00"}
     monkeypatch.setattr(sync, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(sync.platform, "node", lambda: "local-machine")
+    monkeypatch.setattr(sync, "_fetch_marker", lambda config: remote)
+
+    with pytest.raises(sync.PushBlocked):
+        sync._check_push_guard(_cfg(), force=False)
+
+
+def test_push_guard_blocks_same_host_without_local_marker(monkeypatch, tmp_path):
+    remote = {"host": "same-machine", "time": "2026-10-17T22:00:00"}
+    monkeypatch.setattr(sync, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(sync.platform, "node", lambda: "same-machine")
     monkeypatch.setattr(sync, "_fetch_marker", lambda config: remote)
 
     with pytest.raises(sync.PushBlocked):
@@ -118,6 +140,18 @@ def test_push_guard_does_not_swallow_status_errors(monkeypatch):
 
     with pytest.raises(sync.SyncError, match="SSH unavailable"):
         sync._check_push_guard(_cfg(), force=False)
+
+
+def test_push_guard_force_skips_marker_fetch(monkeypatch):
+    def unexpected_fetch(config):
+        raise AssertionError("force 不应读取损坏的远端标记")
+
+    monkeypatch.setattr(sync, "_fetch_marker", unexpected_fetch)
+    monkeypatch.setattr(
+        sync, "console", SimpleNamespace(print=lambda message: None)
+    )
+
+    sync._check_push_guard(_cfg(), force=True)
 
 
 def test_push_uses_environment_host(monkeypatch, tmp_path):
