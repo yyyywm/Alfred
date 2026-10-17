@@ -23,6 +23,7 @@ from __future__ import annotations
 import io
 import json
 import platform
+import posixpath
 import shlex
 import shutil
 import subprocess
@@ -87,6 +88,10 @@ def _ssh_base(config: Config) -> list[str]:
 def _remote_dir(config: Config) -> str:
     """远端目录的 shell 表达式：~ 前缀转成 $HOME 形式，避免引号抑制展开。"""
     d = config.sync.remote_dir.rstrip("/")
+    if not d or posixpath.normpath(d) == "/":
+        raise SyncError(
+            "sync.remote_dir 不能为空或解析为根目录；请使用独立目录（如 ~/alfred-sync）。"
+        )
     if d.startswith("~/"):
         return '"$HOME"/' + shlex.quote(d[2:])
     if d == "~":
