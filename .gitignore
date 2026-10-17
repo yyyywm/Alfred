@@ -1,6 +1,7 @@
 # 运行时数据不入库
 data/
 backups/
+/last_sync.json
 .venv/
 __pycache__/
 *.egg-info/
