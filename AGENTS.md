@@ -192,7 +192,7 @@ Alfred/
 
 ### CLI（`alfred/cli.py`）
 - 所有用户命令入口：`chat`、`ingest`、`feed`、`frameworks`、`consolidate`、`memory`、`skills`、`models`、`backup`、`sync`
-- `sync`：双机记忆同步（`alfred/sync.py`）。tarfile 流式打包经 SSH 与服务器中转仓库互传（current/previous 原子轮换），不依赖系统 tar/rsync；push 护栏：服务器是另一台机器的更新快照且本地未拉取时拦截，交用户选择 先pull/强推/取消，不做自动合并；pull 前自动备份本地；排除 `.lock`/`__pycache__`；配置见 config.yaml `sync` 段
+- `sync`：双机记忆同步（`alfred/sync.py`）。本地用 tarfile 打包经 SSH 与服务器中转仓库互传（current/previous 轮换），本地不依赖系统 tar/rsync、远端需支持 tar；push 护栏：服务器是另一台机器的更新快照且本地未拉取时拦截，交用户选择 先pull/强推/取消，不做自动合并；SSH 或远端标记异常时中止而非按无数据放行；pull 前自动备份本地；排除 `.lock`/`__pycache__`；配置见 config.yaml `sync` 段
 - `backup`：一键打包全部数据（`config.yaml`/`.env`/`rules`/`data`/`hist` + 项目外 skills/rules 目录，见 `backup.py`）为 zip，含 RESTORE.md 恢复说明；默认输出 `backups/alfred-backup-<时间戳>.zip`（已 gitignore）；排除 `.lock`/`__pycache__`；备份含 .env 明文 key，需提醒用户妥善保管
 - `chat` 内支持斜杠命令：`/exit`、`/new`、`/model`、`/remember`、`/memory`、`/why`、`/sessions`、`/load`、`/delete`、`/title`、`/lessons`、`/status`、`/tools`、`/whoami`、`/trust`、`/consolidate`、`/consolidate-review`、`/audit`、`/help`
 - `/tools`：列出 agent 对象上实际注册的工具（ground truth）。模型自称的工具清单不可靠——它无法真正内省注册表，且会被会话历史中自己之前的断言锚定/编造（曾出现旧会话里模型坚称"只有记忆工具"、甚至编出不存在的工具名的情况）；排查"工具调不了"时以 `/tools` 输出为准，再用直接指令（"调用 web_search 搜索 X"）验证实际调用
@@ -347,6 +347,7 @@ python -m pytest tests/ -q
 - `test_history_tool_calls.py`：工具调用记录持久化
 - `test_llm.py`：LLM 连接测试与错误映射
 - `test_backup.py`：备份打包内容、排除项（.lock/__pycache__）、默认输出路径、项目内 rules 目录不重复进 external/
+- `test_sync.py`：远端标记缺失/损坏/SSH 失败、push 护栏、env 主机解析与 tar 排除规则（全程 mock，不访问服务器）
 - `test_memory_visibility.py`：记忆层失败可见化（init_status/peek_client、memory_search 离线诊断）
 - `test_memory_dedup.py`：add_fact 写入前去重（Jaccard 阈值校准、离线/检索失败路径、consolidate 集成）
 - `test_notes_catalog.py`：笔记目录条目抽取、渲染封顶、ingest 集成与失败容错

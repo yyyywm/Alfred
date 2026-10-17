@@ -83,6 +83,8 @@ alfred backup                # 一键备份全部数据（含 .env），用于�
 alfred sync push/pull/status # 双机记忆同步：SSH 中转，换电脑不丢记忆
 ```
 
+双机同步前，在 `.env` 配置 `ALFRED_SYNC_HOST=user@host`；远端服务器需提供 SSH 与 `tar` 命令。同步内容包含 `.env`，请仅使用可信服务器。
+
 ## Chat 交互
 
 ### 启动选项
