@@ -1,4 +1,9 @@
-"""CLI 入口：alfred chat / ingest / feed / consolidate / memory / models / skills。
+"""CLI 入口：alfred chat / ingest / feed / consolidate / memory / models / skills / sync。
+
+sync 子命令（双机记忆同步，详见 sync.py 模块文档）：
+  alfred sync push [--force]  推送本地记忆到服务器中转仓库（护栏防覆盖，不自动合并）
+  alfred sync pull            拉取服务器快照覆盖本地（自动备份本地数据）
+  alfred sync status          查看服务器上最近一次推送的机器与时间
 
 chat 内斜杠命令：
   /exit 退出  /new 新会话  /model <provider:model> 切换闲聊模型
@@ -81,6 +86,79 @@ from .rules.loader import render_rules, scan_rules
 
 app = typer.Typer(help="私人管家 AI Agent", no_args_is_help=True)
 console = Console()
+
+sync_app = typer.Typer(
+    help="记忆同步：经服务器 SSH 中转，在多电脑间搬运记忆（服务器不跑任何服务）",
+    no_args_is_help=True,
+)
+app.add_typer(sync_app, name="sync")
+
+
+@sync_app.command("push")
+def sync_push(
+    force: bool = typer.Option(
+        False, "--force", help="跳过护栏强制推送（远端快照退到 previous/）"
+    ),
+) -> None:
+    """把本地记忆推送到服务器中转仓库（换机器前执行）。
+
+    若服务器上是另一台机器的更新快照而本地未拉取，护栏会拦截并让你
+    当场选择：先 pull 再 push / 强制 push / 取消。不做自动合并。
+    """
+    from . import sync as _sync
+    cfg = load_config()
+    try:
+        _sync.push(cfg, force=force)
+    except _sync.PushBlocked as exc:
+        r = exc.remote
+        console.print(
+            f"[yellow]护栏拦截：服务器上是 [bold]{r.get('host', '?')}[/bold] "
+            f"在 {r.get('time', '?')} 推送的，你本地没有拉过这份数据。[/yellow]"
+        )
+        console.print(
+            "直接 push 会覆盖对方的新记忆（退到 previous/，只能救回一代）。"
+        )
+        choice = typer.prompt(
+            "选择：[p] 先 pull 再 push（推荐）/ [f] 强制 push / [c] 取消",
+            default="c",
+        ).strip().lower()
+        try:
+            if choice == "p":
+                _sync.pull(cfg)
+                _sync.push(cfg)  # pull 后本地基线已最新，护栏自然放行
+            elif choice == "f":
+                _sync.push(cfg, force=True)
+            else:
+                console.print("[dim]已取消。[/dim]")
+                raise typer.Exit(0)
+        except _sync.SyncError as exc2:
+            console.print(f"[red]{exc2}[/red]")
+            raise typer.Exit(1)
+    except _sync.SyncError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+
+@sync_app.command("pull")
+def sync_pull() -> None:
+    """从服务器拉取记忆覆盖本地（到新机器先执行；自动备份本地）。"""
+    from . import sync as _sync
+    try:
+        _sync.pull(load_config())
+    except _sync.SyncError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+
+@sync_app.command("status")
+def sync_status() -> None:
+    """查看服务器上最近一次推送是哪台机器、什么时间。"""
+    from . import sync as _sync
+    try:
+        _sync.status(load_config())
+    except _sync.SyncError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
 
 _ALFRED_VERSION = "0.1.0"
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent

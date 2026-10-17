@@ -80,6 +80,7 @@ alfred consolidate           # 睡眠整理：复盘近期对话，提炼记忆�
 alfred memory list           # 查看长期记忆
 alfred skills                # 查看技能与规则
 alfred backup                # 一键备份全部数据（含 .env），用于迁移到其他机器
+alfred sync push/pull/status # 双机记忆同步：SSH 中转，换电脑不丢记忆
 ```
 
 ## Chat 交互

@@ -123,8 +123,20 @@ class WebConfig(BaseModel):
         return key or None
 
 
+class SyncConfig(BaseModel):
+    """记忆同步：SSH 中转（服务器仅做文件仓库，不跑任何服务）。
+
+    两台电脑各自本地跑 Alfred，通过 `alfred sync push/pull` 经服务器接力。
+    """
+    host: str = ""               # user@server 或 ~/.ssh/config 里的 Host alias
+    port: int = 22
+    remote_dir: str = "~/alfred-sync"  # 服务器上唯一会碰的目录
+    ssh_key: str | None = None   # 私钥路径；None 走默认密钥 / ssh-agent
+
+
 class Config(BaseModel):
     providers: dict[str, ProviderConfig] = {}
+    sync: SyncConfig = SyncConfig()
     models: ModelsConfig = ModelsConfig()
     memory: MemoryConfig = MemoryConfig()
     paths: PathsConfig = PathsConfig()
