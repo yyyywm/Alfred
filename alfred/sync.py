@@ -49,6 +49,7 @@ EXCLUDE_DIRS = {"__pycache__", ".pytest_cache"}
 EXCLUDE_FILES = {".lock"}
 
 _MARKER = "last_sync.json"
+_INVALID_MARKER = "__ALFRED_INVALID_SYNC_MARKER__"
 
 
 class SyncError(RuntimeError):
@@ -146,7 +147,7 @@ def _run_ssh_to_file(config: Config, remote_cmd: str, stdin_path: Path | None,
 
 
 class PushBlocked(SyncError):
-    """护栏拦截：服务器上是另一台机器的更新快照，本地未拉取。"""
+    """护栏拦截：服务器快照不是本地已拉取的版本。"""
 
     def __init__(self, remote: dict, local: dict | None):
         self.remote = remote
@@ -158,31 +159,29 @@ class PushBlocked(SyncError):
 
 
 def _check_push_guard(config: Config, force: bool) -> None:
-    """push 护栏：发现另一台机器的更新快照时拦截，交给用户决定。
+    """push 护栏：本地未基于远端当前快照时拦截，交给用户决定。
 
-    放行条件：远端标记来自本机（无分叉可能），或本地 marker 与远端标识一致
-    （本地基于该快照）；其余一律 PushBlocked，--force 可跳过。
+    放行条件：远端无快照，或本地 marker 与远端标识一致（本地基于该快照）；
+    其余一律 PushBlocked。--force 不读取标记，可用于恢复损坏的快照元数据。
     注意：护栏只拦截+提示，不做任何自动合并——先 pull / 强推 / 取消
     由用户当场选择。
     """
+    if force:
+        console.print("[yellow]--force：跳过护栏，远端快照将退到 previous/。[/yellow]")
+        return
     remote = _fetch_marker(config)
     if remote is None:
-        return  # 仅远端确认无标记时放行；SSH/标记异常由 _fetch_marker 直接报错
-    if remote.get("host") == (platform.node() or "unknown"):
-        return
+        return  # 仅远端确认无快照时放行；SSH/标记异常由 _fetch_marker 直接报错
     local = None
     local_file = PROJECT_ROOT / _MARKER
     if local_file.exists():
         try:
             local = json.loads(local_file.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             local = None
     if isinstance(local, dict) and all(
         local.get(key) == remote.get(key) for key in ("host", "time")
     ):
-        return
-    if force:
-        console.print("[yellow]--force：跳过护栏，远端快照将退到 previous/。[/yellow]")
         return
     raise PushBlocked(remote, local)
 
@@ -233,12 +232,16 @@ def push(config: Config, *, force: bool = False) -> None:
 
 def _fetch_marker(config: Config) -> dict | None:
     r = _remote_dir(config)
-    marker_path = f"{r}/current/{_MARKER}"
+    current_path = f"{r}/current"
+    marker_path = f"{current_path}/{_MARKER}"
+    remote_cmd = (
+        f"if [ -d {current_path} ] || [ -d {r}/previous ]; then "
+        f"if [ -s {marker_path} ]; then cat {marker_path}; "
+        f"else printf '%s' '{_INVALID_MARKER}'; fi; fi"
+    )
     try:
         cp = subprocess.run(
-            _ssh_base(config) + [
-                f"if [ -f {marker_path} ]; then cat {marker_path}; fi"
-            ],
+            _ssh_base(config) + [remote_cmd],
             capture_output=True,
         )
     except FileNotFoundError as exc:
@@ -251,6 +254,11 @@ def _fetch_marker(config: Config) -> dict | None:
     raw = cp.stdout.strip()
     if not raw:
         return None
+    if raw == _INVALID_MARKER.encode():
+        raise SyncError(
+            "远端 current/ 或 previous/ 已存在，但 current/last_sync.json "
+            "缺失或为空；已停止以避免覆盖。"
+        )
     try:
         marker = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -335,8 +343,9 @@ def status(config: Config) -> None:
     if local.exists():
         try:
             lm = json.loads(local.read_text(encoding="utf-8"))
-            console.print(
-                f"本机当前快照来源：{lm.get('host', '?')} 推送于 {lm.get('time', '?')}"
-            )
-        except json.JSONDecodeError:
+            if isinstance(lm, dict):
+                console.print(
+                    f"本机当前快照来源：{lm.get('host', '?')} 推送于 {lm.get('time', '?')}"
+                )
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             pass
