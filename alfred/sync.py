@@ -54,12 +54,24 @@ class SyncError(RuntimeError):
     """同步失败（SSH / 打包 / 远端状态），message 面向用户。"""
 
 
-def _require_host(config: Config) -> None:
-    if not config.sync.host:
+def _resolve_host(config: Config) -> str:
+    """服务器地址：config.yaml 的 sync.host 优先，回退到 .env 的 ALFRED_SYNC_HOST。
+
+    推荐用 .env——config.yaml 会被提交进 git 仓库，服务器 IP 属于敏感信息
+    （教训：曾因把填好的 host 留在 config.yaml 提交，IP 泄露进公开仓库历史）。
+    """
+    from os import environ
+    return config.sync.host or environ.get("ALFRED_SYNC_HOST", "")
+
+
+def _require_host(config: Config) -> str:
+    host = _resolve_host(config)
+    if not host:
         raise SyncError(
-            "未配置 sync.host。请在 config.yaml 的 sync 段填入服务器地址"
-            "（user@host 或 ~/.ssh/config 里的 Host alias）。"
+            "未配置服务器地址。在 .env 写入 ALFRED_SYNC_HOST=user@host（推荐，不进 git），"
+            "或 config.yaml 的 sync.host。"
         )
+    return host
 
 
 def _ssh_base(config: Config) -> list[str]:
@@ -68,7 +80,7 @@ def _ssh_base(config: Config) -> list[str]:
             "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
     if config.sync.ssh_key:
         args += ["-i", str(Path(config.sync.ssh_key).expanduser())]
-    args.append(config.sync.host)
+    args.append(_require_host(config))
     return args
 
 
