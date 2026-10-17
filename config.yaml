@@ -88,3 +88,11 @@ web:
   # search_max_results: 5     # 每次搜索返回条数
   # fetch_max_chars: 4000     # web_fetch 正文截断上限
   # timeout_s: 30             # 联网请求超时
+
+# 记忆同步（alfred sync push/pull/status）：服务器仅做 SSH 文件中转，不跑任何服务
+# 用法纪律：换机器前 push；到新机器先 pull 再聊；同步时另一台 Alfred 必须关闭
+sync:
+  host: "ubuntu@106.53.114.138"                    # 必填：user@服务器地址，或 ~/.ssh/config 里的 Host alias
+  port: 22
+  remote_dir: "~/alfred-sync" # 服务器上唯一会碰的目录（含 current/ 与 previous/ 两份快照）
+  # ssh_key: "~/.ssh/id_ed25519"  # 不填走默认密钥 / ssh-agent；BatchMode 下需免密登录
