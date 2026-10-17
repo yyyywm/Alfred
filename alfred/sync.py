@@ -89,15 +89,21 @@ def _ssh_base(config: Config) -> list[str]:
 def _remote_dir(config: Config) -> str:
     """远端目录的 shell 表达式：~ 前缀转成 $HOME 形式，避免引号抑制展开。"""
     d = config.sync.remote_dir.rstrip("/")
-    if not d or posixpath.normpath(d) == "/":
-        raise SyncError(
-            "sync.remote_dir 不能为空或解析为根目录；请使用独立目录（如 ~/alfred-sync）。"
-        )
+    error = (
+        "sync.remote_dir 必须使用独立目录（如 ~/alfred-sync），"
+        "不能为空、根目录或父目录逃逸。"
+    )
+    if not d or d == "~":
+        raise SyncError(error)
     if d.startswith("~/"):
-        return '"$HOME"/' + shlex.quote(d[2:])
-    if d == "~":
-        return '"$HOME"'
-    return shlex.quote(d)
+        normalized = posixpath.normpath(d[2:])
+        if normalized in (".", "..") or normalized.startswith("../"):
+            raise SyncError(error)
+        return '"$HOME"/' + shlex.quote(normalized)
+    normalized = posixpath.normpath(d)
+    if normalized in ("/", ".", "..") or normalized.startswith("../"):
+        raise SyncError(error)
+    return shlex.quote(normalized)
 
 
 def _tar_filter(ti: tarfile.TarInfo) -> tarfile.TarInfo | None:
