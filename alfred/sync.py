@@ -162,7 +162,7 @@ def _check_push_guard(config: Config, force: bool) -> None:
     """
     remote = _fetch_marker(config)
     if remote is None:
-        return  # 服务器无数据；无法连接的情形会在后续传输阶段报错
+        return  # 仅远端确认无标记时放行；SSH/标记异常由 _fetch_marker 直接报错
     if remote.get("host") == (platform.node() or "unknown"):
         return
     local = None
@@ -183,7 +183,7 @@ def _check_push_guard(config: Config, force: bool) -> None:
 
 def push(config: Config, *, force: bool = False) -> None:
     """本地 → 服务器：护栏检查 → 打包同步条目 → 远端原子轮换 current/previous。"""
-    _require_host(config)
+    host = _require_host(config)
     _check_push_guard(config, force)
     items = [it for it in SYNC_ITEMS if (PROJECT_ROOT / it).exists()]
     if not items:
@@ -206,7 +206,7 @@ def push(config: Config, *, force: bool = False) -> None:
 
         size_mb = tarball.stat().st_size / 1024 / 1024
         console.print(
-            f"[cyan]推送 {size_mb:.1f}MB → {config.sync.host}:{config.sync.remote_dir} …[/cyan]"
+            f"[cyan]推送 {size_mb:.1f}MB → {host}:{config.sync.remote_dir} …[/cyan]"
         )
         remote_cmd = (
             f"set -e; "
@@ -227,21 +227,46 @@ def push(config: Config, *, force: bool = False) -> None:
 
 def _fetch_marker(config: Config) -> dict | None:
     r = _remote_dir(config)
-    cp = subprocess.run(
-        _ssh_base(config) + [f"cat {r}/current/{_MARKER}"],
-        capture_output=True,
-    )
+    marker_path = f"{r}/current/{_MARKER}"
+    try:
+        cp = subprocess.run(
+            _ssh_base(config) + [
+                f"if [ -f {marker_path} ]; then cat {marker_path}; fi"
+            ],
+            capture_output=True,
+        )
+    except FileNotFoundError as exc:
+        raise SyncError(
+            f"找不到 ssh 命令：{exc}。Windows 请在「可选功能」中启用 OpenSSH 客户端。"
+        ) from exc
     if cp.returncode != 0:
+        err = cp.stderr.decode("utf-8", "replace").strip()
+        raise SyncError(f"读取远端同步标记失败（SSH 退出码 {cp.returncode}）：{err}")
+    raw = cp.stdout.strip()
+    if not raw:
         return None
     try:
-        return json.loads(cp.stdout.decode("utf-8"))
-    except json.JSONDecodeError:
-        return None
+        marker = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SyncError(
+            "远端同步标记 last_sync.json 已损坏，无法安全判断快照状态。"
+        ) from exc
+    if (
+        not isinstance(marker, dict)
+        or not isinstance(marker.get("host"), str)
+        or not marker["host"]
+        or not isinstance(marker.get("time"), str)
+        or not marker["time"]
+    ):
+        raise SyncError(
+            "远端同步标记 last_sync.json 格式无效，无法安全判断快照状态。"
+        )
+    return marker
 
 
 def pull(config: Config) -> None:
     """服务器 → 本地：先自动备份本地数据，再拉取解压逐项替换。"""
-    _require_host(config)
+    host = _require_host(config)
 
     marker = _fetch_marker(config)
     if marker is None:
@@ -263,7 +288,7 @@ def pull(config: Config) -> None:
         staging = Path(tmp) / "staging"
         staging.mkdir()
 
-        console.print(f"[cyan]从 {config.sync.host} 拉取…[/cyan]")
+        console.print(f"[cyan]从 {host} 拉取…[/cyan]")
         _run_ssh_to_file(config, f"tar czf - -C {r}/current .",
                          stdin_path=None, stdout_path=tarball)
 
@@ -294,7 +319,7 @@ def status(config: Config) -> None:
     _require_host(config)
     marker = _fetch_marker(config)
     if marker is None:
-        console.print("[yellow]服务器上还没有同步数据（或无法连接）。[/yellow]")
+        console.print("[yellow]服务器上还没有同步数据。[/yellow]")
         return
     console.print(
         f"上次推送：[bold]{marker.get('host', '?')}[/bold] "
@@ -309,4 +334,3 @@ def status(config: Config) -> None:
             )
         except json.JSONDecodeError:
             pass
-
