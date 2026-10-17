@@ -20,6 +20,14 @@ def _cp(returncode: int = 0, stdout: bytes = b"", stderr: bytes = b""):
     )
 
 
+@pytest.mark.parametrize("remote_dir", ["", "/", "////", "/.", "/tmp/.."])
+def test_remote_dir_rejects_empty_or_root(remote_dir):
+    cfg = Config(sync=SyncConfig(host="user@server", remote_dir=remote_dir))
+
+    with pytest.raises(sync.SyncError, match="独立目录"):
+        sync._remote_dir(cfg)
+
+
 def test_fetch_marker_returns_none_for_confirmed_absence(monkeypatch):
     calls = []
 
