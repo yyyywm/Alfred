@@ -92,7 +92,8 @@ web:
 # 记忆同步（alfred sync push/pull/status）：服务器仅做 SSH 文件中转，不跑任何服务
 # 用法纪律：换机器前 push；到新机器先 pull 再聊；同步时另一台 Alfred 必须关闭
 sync:
-  host: "ubuntu@***REMOVED***"                    # 必填：user@服务器地址，或 ~/.ssh/config 里的 Host alias
+  host: ""                    # 留空！服务器地址请写 .env 的 ALFRED_SYNC_HOST=user@host
+                              # （本文件会进 git，IP 泄露进公开仓库的教训：2026-10-17）
   port: 22
   remote_dir: "~/alfred-sync" # 独立非根目录；服务器只碰此目录（含 current/ 与 previous/）
   # ssh_key: "~/.ssh/id_ed25519"  # 不填走默认密钥 / ssh-agent；BatchMode 下需免密登录
