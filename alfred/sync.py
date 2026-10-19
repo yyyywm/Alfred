@@ -78,8 +78,11 @@ def _require_host(config: Config) -> str:
 
 def _ssh_base(config: Config) -> list[str]:
     # BatchMode：免密没配好时快速失败并给出可读错误，而不是卡在密码提示上
+    # ServerAlive*：连接假死（WiFi 抖动/NAT 断流/服务器卡顿）最多 ~30s 报错退出，
+    # 否则 TCP keepalive 默认小时级，subprocess 会零输出无限挂起
     args = ["ssh", "-p", str(config.sync.port),
-            "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
+            "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+            "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3"]
     if config.sync.ssh_key:
         args += ["-i", str(Path(config.sync.ssh_key).expanduser())]
     args.append(_require_host(config))
@@ -124,20 +127,25 @@ def _local_marker() -> dict:
 
 
 def _run_ssh_to_file(config: Config, remote_cmd: str, stdin_path: Path | None,
-                     stdout_path: Path | None) -> None:
+                     stdout_path: Path | None, timeout: int = 600) -> None:
     """跑一次 ssh，stdin/stdout 走磁盘临时文件（避免管道生命周期坑）。
 
-    出错时抛出带远端 stderr 的 SyncError。
+    出错时抛出带远端 stderr 的 SyncError；timeout 秒无结果按网络停滞处理。
     """
     cmd = _ssh_base(config) + [remote_cmd]
     stdin = open(stdin_path, "rb") if stdin_path else subprocess.DEVNULL
     stdout = open(stdout_path, "wb") if stdout_path else subprocess.DEVNULL
     try:
         cp = subprocess.run(cmd, stdin=stdin, stdout=stdout,
-                            stderr=subprocess.PIPE)
+                            stderr=subprocess.PIPE, timeout=timeout)
     except FileNotFoundError as exc:
         raise SyncError(
             f"找不到 ssh 命令：{exc}。Windows 请在「可选功能」中启用 OpenSSH 客户端。"
+        )
+    except subprocess.TimeoutExpired:
+        raise SyncError(
+            f"SSH 传输超过 {timeout} 秒未完成，已中止。网络停滞或服务器无响应，"
+            "请检查网络后重试。"
         )
     finally:
         for f in (stdin, stdout):
@@ -195,6 +203,7 @@ def _check_push_guard(config: Config, force: bool) -> None:
 def push(config: Config, *, force: bool = False) -> None:
     """本地 → 服务器：护栏检查 → 打包同步条目 → 远端原子轮换 current/previous。"""
     host = _require_host(config)
+    console.print(f"[dim]正在连接 {host} …[/dim]")
     _check_push_guard(config, force)
     items = [it for it in SYNC_ITEMS if (PROJECT_ROOT / it).exists()]
     if not items:
@@ -237,6 +246,8 @@ def push(config: Config, *, force: bool = False) -> None:
 
 
 def _fetch_marker(config: Config) -> dict | None:
+    """读远端同步标记。连接失败/超时/标记损坏一律抛 SyncError（fail-closed）；
+    仅确认远端确实无快照时返回 None。"""
     r = _remote_dir(config)
     current_path = f"{r}/current"
     marker_path = f"{current_path}/{_MARKER}"
@@ -248,12 +259,16 @@ def _fetch_marker(config: Config) -> dict | None:
     try:
         cp = subprocess.run(
             _ssh_base(config) + [remote_cmd],
-            capture_output=True,
+            capture_output=True, timeout=60,
         )
     except FileNotFoundError as exc:
         raise SyncError(
             f"找不到 ssh 命令：{exc}。Windows 请在「可选功能」中启用 OpenSSH 客户端。"
         ) from exc
+    except subprocess.TimeoutExpired:
+        raise SyncError(
+            "连接服务器超过 60 秒无响应，已中止。请检查网络与 sync.host 配置后重试。"
+        )
     if cp.returncode != 0:
         err = cp.stderr.decode("utf-8", "replace").strip()
         raise SyncError(f"读取远端同步标记失败（SSH 退出码 {cp.returncode}）：{err}")
@@ -288,6 +303,7 @@ def pull(config: Config) -> None:
     """服务器 → 本地：先自动备份本地数据，再拉取解压逐项替换。"""
     host = _require_host(config)
 
+    console.print(f"[dim]正在连接 {host} …[/dim]")
     marker = _fetch_marker(config)
     if marker is None:
         raise SyncError(
@@ -308,7 +324,10 @@ def pull(config: Config) -> None:
         staging = Path(tmp) / "staging"
         staging.mkdir()
 
-        console.print(f"[cyan]从 {host} 拉取…[/cyan]")
+        console.print(
+            f"[cyan]从 {host} 拉取…[/cyan]"
+            "[dim]（数据量大时可能需几分钟，传输有 10 分钟超时保护）[/dim]"
+        )
         _run_ssh_to_file(config, f"tar czf - -C {r}/current .",
                          stdin_path=None, stdout_path=tarball)
 
@@ -336,7 +355,8 @@ def pull(config: Config) -> None:
 
 def status(config: Config) -> None:
     """显示服务器上最近一次推送的信息，帮助判断该 push 还是该 pull。"""
-    _require_host(config)
+    host = _require_host(config)
+    console.print(f"[dim]正在连接 {host} …[/dim]")
     marker = _fetch_marker(config)
     if marker is None:
         console.print("[yellow]服务器上还没有同步数据。[/yellow]")

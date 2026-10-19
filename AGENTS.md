@@ -192,7 +192,7 @@ Alfred/
 
 ### CLI（`alfred/cli.py`）
 - 所有用户命令入口：`chat`、`ingest`、`feed`、`frameworks`、`consolidate`、`memory`、`skills`、`models`、`backup`、`sync`
-- `sync`：双机记忆同步（`alfred/sync.py`）。本地用 tarfile 打包经 SSH 与服务器中转仓库互传（current/previous 轮换），本地不依赖系统 tar/rsync、远端需支持 tar；push 护栏：本地未拉取远端当前快照时拦截（不依赖主机名或两机时钟），交用户选择 先pull/强推/取消，不做自动合并；remote_dir 禁止空值/根目录；SSH 或远端标记异常时中止而非按无数据放行，`--force` 可跳过损坏标记用于恢复；pull 前自动备份本地；排除 `.lock`/`__pycache__`；配置见 config.yaml `sync` 段
+- `sync`：双机记忆同步（`alfred/sync.py`）。本地用 tarfile 打包经 SSH 与服务器中转仓库互传（current/previous 轮换），本地不依赖系统 tar/rsync、远端需支持 tar；push 护栏：本地未拉取远端当前快照时拦截（不依赖主机名或两机时钟），交用户选择 先pull/强推/取消，不做自动合并；remote_dir 禁止空值/根目录；SSH 或远端标记异常时中止而非按无数据放行，`--force` 可跳过损坏标记用于恢复；pull 前自动备份本地；排除 `.lock`/`__pycache__`；配置见 config.yaml `sync` 段。SSH 健壮性：`BatchMode` + `ConnectTimeout=10` + `ServerAliveInterval=10/CountMax=3`（连接假死 ~30s 报错退出，不再无限挂起），subprocess 超时：marker 查询 60s、tar 传输 600s
 - `backup`：一键打包全部数据（`config.yaml`/`.env`/`rules`/`data`/`hist` + 项目外 skills/rules 目录，见 `backup.py`）为 zip，含 RESTORE.md 恢复说明；默认输出 `backups/alfred-backup-<时间戳>.zip`（已 gitignore）；排除 `.lock`/`__pycache__`；备份含 .env 明文 key，需提醒用户妥善保管
 - `chat` 内支持斜杠命令：`/exit`、`/new`、`/model`、`/remember`、`/memory`、`/why`、`/sessions`、`/load`、`/delete`、`/title`、`/lessons`、`/status`、`/tools`、`/whoami`、`/trust`、`/consolidate`、`/consolidate-review`、`/audit`、`/help`
 - `/tools`：列出 agent 对象上实际注册的工具（ground truth）。模型自称的工具清单不可靠——它无法真正内省注册表，且会被会话历史中自己之前的断言锚定/编造（曾出现旧会话里模型坚称"只有记忆工具"、甚至编出不存在的工具名的情况）；排查"工具调不了"时以 `/tools` 输出为准，再用直接指令（"调用 web_search 搜索 X"）验证实际调用
