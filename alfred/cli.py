@@ -1333,6 +1333,7 @@ def web_ui(
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="监听地址"),
     port: int = typer.Option(8080, "--port", "-p", help="监听端口"),
     reload: bool = typer.Option(False, "--reload", help="开发模式：代码变更自动重载"),
+    workers: int = typer.Option(1, "--workers", "-w", help="工作进程数（服务器部署建议 2-4）"),
 ):
     """启动 Web 界面（浏览器访问 http://127.0.0.1:8080）。"""
     try:
@@ -1346,15 +1347,20 @@ def web_ui(
         )
         raise typer.Exit(1)
 
+    if workers > 1 and reload:
+        console.print("[yellow]警告：--reload 与 --workers 不兼容，已忽略 workers[/yellow]")
+        workers = 1
+
     app = create_app()
     console.print(f"[green]启动 Alfred Web UI:[/green] http://{host}:{port}")
-    console.print("[dim]按 Ctrl+C 停止服务器[/dim]\n")
+    console.print(f"[dim]进程数: {workers} | 按 Ctrl+C 停止服务器[/dim]\n")
 
     uvicorn.run(
         app,
         host=host,
         port=port,
         reload=reload,
+        workers=workers,
         log_level="info",
     )
 

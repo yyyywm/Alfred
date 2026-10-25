@@ -13,10 +13,10 @@
     → threading.Event.set()
     → agent 线程解除阻塞 → 继续产生事件
 
-线程安全要点：
-- threading.Event + dict 用于 confirm 桥接（同步线程 ↔ 异步协程）
-- asyncio.Queue 用于事件跨线程传递（通过 call_soon_threadsafe 入队）
-- 每个 WebSession 实例绑定一个 WebSocket 连接（一个浏览器标签页 = 一个会话）
+内存优化：
+  - 静态数据（技能索引、教训、规则、笔记目录、代码库索引）由 AppContext 加载一次，
+    通过构造参数注入，避免每个 WebSocket 连接重复 I/O。
+  - MemoryBlocks 和 LessonsBlock 实例从 AppContext 共享。
 """
 
 from __future__ import annotations
@@ -44,12 +44,9 @@ from ..events import (
 )
 from ..history import Session
 from ..memory.blocks import MemoryBlocks
-from ..rules.loader import render_rules, scan_rules
-from ..skills.loader import render_skills_index, scan_skills
 
 logger = logging.getLogger(__name__)
 
-# confirm 超时：5 分钟
 _CONFIRM_TIMEOUT_S = 300
 
 
@@ -57,218 +54,199 @@ class WebSession:
     """一个 Web 会话 = 一个浏览器标签页 + 一个 JSONL 会话文件。
 
     生命周期：
-    1. 创建实例（绑定 session_id 和 config）
+    1. 创建实例（绑定 session_id 和 config，静态数据从 AppContext 注入）
     2. start_turn(user_input) — 启动后台线程运行对话轮次
     3. event_queue — 异步事件队列，供 sender 协程读取
     4. respond_confirm(id, approved) — 响应确认请求
     5. get_messages() — 获取会话历史（REST API 用）
     """
 
-    def __init__(self, config: Config, session_id: str | None = None):
+    def __init__(
+        self,
+        config: Config,
+        session_id: str | None = None,
+        *,
+        skill_index: str = "",
+        lessons_text: str = "",
+        rules_text: str = "",
+        notes_catalog: str = "",
+        codebase_index: str = "",
+        blocks: MemoryBlocks | None = None,
+        lessons: Any = None,
+    ):
         self.config = config
         self.session = Session(config, session_id=session_id)
         self.agent = build_agent(config)
-        self.blocks = MemoryBlocks(config)
+        self.blocks = blocks or MemoryBlocks(config)
 
-        # 异步事件队列（sender 协程读取）
+        # 共享的静态数据（从 AppContext 注入，避免重复加载）
+        self._skill_index = skill_index
+        self._lessons_text = lessons_text
+        self._rules_text = rules_text
+        self._notes_catalog = notes_catalog
+        self._codebase_index = codebase_index
+        self._lessons = lessons
+
+        # 异步事件队列
         self.event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
-        # confirm 桥接（线程安全）
+        # confirm 桥接
         self._pending_confirm: dict[str, Any] | None = None
         self._confirm_lock = threading.Lock()
-
-        # 当前事件循环引用
         self._loop: asyncio.AbstractEventLoop | None = None
 
-        # 预加载静态数据（与 CLI chat 命令一致）
-        self._load_static_data()
-
-    def _load_static_data(self) -> None:
-        """一次性读好技能索引、教训、规则、笔记目录、代码库索引。"""
-        self._skill_index = render_skills_index(scan_skills(self.config))
-        self._lessons_text = self._load_lessons_text()
-        _always_rules, _recall_rules = render_rules(scan_rules(self.config))
-        self._rules_text = "\n\n".join(
-            t for t in (_always_rules, _recall_rules) if t
-        )
-        from ..knowledge.catalog import load_catalog
-        self._notes_catalog = load_catalog(self.config)
-        from ..codebase_index import ensure_index
-        self._codebase_index = ensure_index(self.config)
-
-    def _load_lessons_text(self) -> str:
-        """一次性读好 lessons 文本。"""
-        from ..memory.lessons import LessonsBlock
-        try:
-            lb = LessonsBlock(self.config)
-            text = lb.read().strip()
-        except Exception:
-            return ""
-        if not text or "还没有教训" in text:
-            return ""
-        return f"# 你从过去中学到的教训（RefleXion 教训库）\n{text}"
-
-    # ── 事件循环绑定 ────────────────────────────────────────────────
-
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
-        """绑定事件循环（启动时调用一次）。"""
         self._loop = loop
 
-    # ── Confirm 桥接 ────────────────────────────────────────────────
+    # ── Confirm 桥接 ──
 
     def _confirm(self, msg: str, tool_name: str | None = None) -> bool:
-        """Confirm 回调：推入 ConfirmRequest 到事件队列，阻塞等待浏览器响应。
-
-        此方法由 agent 线程（chat_turn_stream 内部）调用。
-        """
+        """确认回调（同步，被 agent 线程调用）。阻塞直到浏览器响应或超时。"""
         confirm_id = uuid.uuid4().hex[:8]
         event = threading.Event()
-        result = {"approved": False}
-
         with self._confirm_lock:
-            self._pending_confirm = {
-                "id": confirm_id,
-                "event": event,
-                "result": result,
-            }
+            self._pending_confirm = {"id": confirm_id, "event": event}
 
-        # 推入 ConfirmRequest 到 asyncio 队列（线程安全）
-        if self._loop:
-            self._loop.call_soon_threadsafe(
-                self.event_queue.put_nowait,
-                {
-                    "type": "confirm_request",
-                    "id": confirm_id,
-                    "message": msg,
-                    "tool_name": tool_name,
-                },
-            )
+        # 推送确认请求到事件队列
+        self._emit_to_queue({
+            "type": "confirm_request",
+            "id": confirm_id,
+            "message": msg,
+            "tool_name": tool_name,
+        })
 
-        # 阻塞等待浏览器响应（agent 线程在此暂停）
-        event.wait(timeout=_CONFIRM_TIMEOUT_S)
-
-        with self._confirm_lock:
-            approved = result["approved"]
-            self._pending_confirm = None
-        return approved
+        try:
+            approved = event.wait(timeout=_CONFIRM_TIMEOUT_S)
+            if not approved:
+                logger.warning("确认超时（%ds），自动拒绝", _CONFIRM_TIMEOUT_S)
+                return False
+            return True
+        finally:
+            with self._confirm_lock:
+                if self._pending_confirm and self._pending_confirm["id"] == confirm_id:
+                    self._pending_confirm = None
 
     def respond_confirm(self, confirm_id: str, approved: bool) -> bool:
-        """响应确认请求（由 receiver 协程调用）。"""
+        """响应确认请求（异步，被 WebSocket receiver 调用）。线程安全。"""
         with self._confirm_lock:
-            if self._pending_confirm and self._pending_confirm["id"] == confirm_id:
-                self._pending_confirm["result"]["approved"] = approved
-                self._pending_confirm["event"].set()
-                return True
-        return False
+            if not self._pending_confirm:
+                return False
+            if self._pending_confirm["id"] != confirm_id:
+                return False
+            self._pending_confirm["event"].set()
+            return True
 
-    # ── 事件序列化 ──────────────────────────────────────────────────
+    def _emit_to_queue(self, event: dict[str, Any]) -> None:
+        """线程安全地推送事件到 asyncio.Queue。"""
+        if self._loop and not self._loop.is_closed():
+            asyncio.run_coroutine_threadsafe(self._async_emit(event), self._loop)
+        elif self._loop is None:
+            try:
+                self.event_queue.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
+
+    async def _async_emit(self, event: dict[str, Any]) -> None:
+        await self.event_queue.put(event)
+
+    # ── 事件序列化 ──
 
     @staticmethod
-    def _serialize_event(event: Any) -> dict[str, Any]:
-        """将 EventBus 事件序列化为 JSON 可传输的字典。"""
+    def _serialize_event(event: Any) -> dict[str, Any] | None:
+        """将 EventBus 事件序列化为可 JSON 传输的字典。"""
         if isinstance(event, TurnStart):
             return {"type": "turn_start", "session_id": event.session_id}
-        elif isinstance(event, AssistantChunk):
+        if isinstance(event, AssistantChunk):
             return {"type": "assistant_chunk", "delta": event.delta}
-        elif isinstance(event, ToolCallStart):
+        if isinstance(event, ToolCallStart):
             return {
                 "type": "tool_call_start",
+                "tool_call_id": event.tool_call_id,
                 "tool_name": event.tool_name,
                 "args": event.args,
-                "tool_call_id": event.tool_call_id,
             }
-        elif isinstance(event, ToolCallEnd):
+        if isinstance(event, ToolCallEnd):
             return {
                 "type": "tool_call_end",
-                "tool_name": event.tool_name,
-                "args": event.args,
-                "is_error": event.is_error,
-                "result": str(event.result)[:3000],
                 "tool_call_id": event.tool_call_id,
+                "tool_name": event.tool_name,
+                "result": event.result[:3000] if len(event.result) > 3000 else event.result,
+                "is_error": event.is_error,
             }
-        elif isinstance(event, ToolDenied):
+        if isinstance(event, ToolDenied):
             return {
                 "type": "tool_denied",
-                "tool_name": event.tool_name,
-                "args": event.args,
-                "reason": event.reason,
                 "tool_call_id": event.tool_call_id,
+                "tool_name": event.tool_name,
+                "reason": event.reason,
             }
-        elif isinstance(event, TurnEnd):
+        if isinstance(event, TurnEnd):
             return {"type": "turn_end", "usage": event.usage}
-        elif isinstance(event, TurnError):
-            return {"type": "turn_error", "error": event.error}
-        elif isinstance(event, TurnRetrying):
+        if isinstance(event, TurnError):
+            return {"type": "turn_error", "error": str(event.error)}
+        if isinstance(event, TurnRetrying):
             return {
                 "type": "turn_retrying",
                 "attempt": event.attempt,
                 "max_retries": event.max_retries,
                 "wait_seconds": event.wait_seconds,
-                "error": error
-                if (error := event.error) else "",
             }
-        elif isinstance(event, ContextCompacted):
+        if isinstance(event, ContextCompacted):
             return {
                 "type": "context_compacted",
                 "summary": event.summary,
                 "retained_message_count": event.retained_message_count,
             }
-        return {"type": "unknown_event", "event_repr": repr(event)}
+        return {"type": "unknown_event", "event_type": type(event).__name__}
 
-    # ── 对话轮次 ────────────────────────────────────────────────────
+    def _on_event(self, event: Any) -> None:
+        """EventBus 订阅回调：将事件序列化后放入队列。"""
+        serialized = self._serialize_event(event)
+        if serialized:
+            self._emit_to_queue(serialized)
 
-    async def start_turn(self, user_input: str) -> None:
-        """启动一轮对话，在后台线程运行 agent，事件通过 event_queue 流出。
+    # ── 对话轮次 ──
 
-        此方法由 receiver 协程调用。不阻塞调用者——事件通过 event_queue 异步传递。
-        """
-        loop = self._loop
-        if not loop:
-            raise RuntimeError("事件循环未绑定，请先调用 bind_loop")
+    def start_turn(self, user_input: str) -> None:
+        """启动一个对话轮次（后台线程）。"""
 
-        bus = EventBus()
+        def _run_turn():
+            bus = EventBus()
+            bus.subscribe(self._on_event)
 
-        # 订阅 EventBus，将事件推入 asyncio 队列（线程安全）
-        def on_event(event: Any) -> None:
-            serialized = self._serialize_event(event)
-            loop.call_soon_threadsafe(self.event_queue.put_nowait, serialized)
+            deps = AlfredDeps(
+                config=self.config,
+                blocks=self.blocks,
+                confirm=self._confirm,
+                last_recalled=[],
+                session_id=self.session.id,
+                bus=bus,
+                tool_call_count=0,
+                skill_index=self._skill_index,
+                lessons_text=self._lessons_text,
+                rules_text=self._rules_text,
+                notes_catalog=self._notes_catalog,
+                codebase_index=self._codebase_index,
+            )
 
-        bus.subscribe(on_event)
-
-        # 构建 deps
-        deps = AlfredDeps(
-            config=self.config,
-            blocks=self.blocks,
-            confirm=self._confirm,
-            skill_index=self._skill_index,
-            lessons_text=self._lessons_text,
-            rules_text=self._rules_text,
-            notes_catalog=self._notes_catalog,
-            codebase_index=self._codebase_index,
-        )
-
-        # 在后台线程运行 chat_turn_stream（同步生成器）
-        def _run() -> None:
             try:
-                for _ in chat_turn_stream(
-                    self.agent, deps, self.session, user_input, bus=bus
-                ):
-                    pass  # 事件已通过 bus 订阅推入队列
-            except Exception as exc:
-                logger.exception("chat_turn_stream 异常")
-                loop.call_soon_threadsafe(
-                    self.event_queue.put_nowait,
-                    {"type": "turn_error", "error": str(exc)},
+                chat_turn_stream(
+                    self.agent,
+                    deps,
+                    self.session,
+                    user_input,
                 )
-            finally:
-                loop.call_soon_threadsafe(
-                    self.event_queue.put_nowait, {"type": "turn_complete"}
-                )
+            except Exception as e:
+                logger.exception("对话轮次异常")
+                self._emit_to_queue({
+                    "type": "turn_error",
+                    "error": str(e),
+                })
 
-        thread = threading.Thread(target=_run, daemon=True)
+        thread = threading.Thread(target=_run_turn, daemon=True, name=f"web-turn-{self.session.id}")
         thread.start()
 
-    # ── 模型切换 ────────────────────────────────────────────────────
+    # ── 模型切换 ──
 
     def switch_model(self, model_ref: str) -> None:
         """切换模型（重建 agent）。"""
@@ -276,7 +254,7 @@ class WebSession:
         self.config.models.chat = model_ref
         self.agent = build_agent(self.config, model_ref)
 
-    # ── 会话历史 ────────────────────────────────────────────────────
+    # ── 会话历史 ──
 
     def get_messages(self) -> list[dict]:
         """获取当前会话的消息列表（供 REST API 使用）。"""
@@ -292,5 +270,4 @@ class WebSession:
         ]
 
     def get_session_id(self) -> str:
-        """获取会话 ID。"""
         return self.session.id
