@@ -631,9 +631,11 @@ function respondConfirm(approved) {
 
 el.btnConfirmApprove.addEventListener('click', () => respondConfirm(true));
 el.btnConfirmDeny.addEventListener('click', () => respondConfirm(false));
-el.confirmModal.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') respondConfirm(true);
-  if (e.key === 'Escape') respondConfirm(false);
+// keydown 挂在 document 上（弹窗 div 无焦点时收不到键盘事件）
+document.addEventListener('keydown', (e) => {
+  if (el.confirmModal.style.display !== 'flex') return;
+  if (e.key === 'Enter') { e.preventDefault(); respondConfirm(true); }
+  if (e.key === 'Escape') { e.preventDefault(); respondConfirm(false); }
 });
 
 // ── 模型切换 ──
