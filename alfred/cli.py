@@ -335,13 +335,16 @@ def _handle_trust(arg: str) -> None:
 
 
 def _resolve_session_ref(config, ref: str, listed: list[SessionInfo]) -> str | None:
-    """把 /load、/delete 的参数解析为会话 id：列表序号 → id 前缀 → 标题子串。"""
+    """把 /load、/delete 的参数解析为会话 id：列表序号 → id 前缀 → 标题子串。
+
+    纯数字参数优先按序号解析；超出序号范围时回退到 id 前缀匹配
+    （hex id 前几位可能恰好是纯数字，如 51466577f25e）。
+    """
     if ref.isdigit():
         idx = int(ref) - 1
         if 0 <= idx < len(listed):
             return listed[idx].id
-        console.print(f"[red]找不到会话：{ref}[/red]")
-        return None
+        # 超出序号范围：可能是纯数字 id 前缀，继续走前缀/标题匹配
     sessions = list_sessions(config)
     for info in sessions:
         if info.id.startswith(ref):
