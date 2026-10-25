@@ -123,6 +123,49 @@ alfred chat -s <session>   # 恢复指定会话
 | `/status` | 检查当前模型与 embedding 连接状态 |
 | `/exit` 或 `/quit` | 退出 |
 
+## Web 界面
+
+除了终端 TUI，Alfred 还提供完整的浏览器 Web 界面，适合在浏览器中管理会话、查看记忆、切换模型。
+
+### 安装
+
+```bash
+pip install alfred[web]
+```
+
+### 启动
+
+```bash
+alfred web                 # 默认启动在 http://127.0.0.1:8080
+alfred web -p 9000         # 自定义端口
+alfred web --reload        # 开发模式：代码变更自动重载
+```
+
+### 功能
+
+| 功能 | 说明 |
+|---|---|
+| 聊天对话 | 流式回复，与 TUI 使用同一套 agent 内核 |
+| 会话管理 | 侧边栏列出所有会话，支持创建、切换、删除、重命名 |
+| 记忆查看/编辑 | 直接查看和编辑 human/persona/lessons 三个记忆块 |
+| 模型切换 | 下拉框切换闲聊模型（与 `/model` 等效） |
+| 技能查看 | 查看已安装的技能列表 |
+| 状态仪表盘 | 查看模型配置、记忆层连接状态、积累统计 |
+| 确认请求 | 需要确认的操作（如 shell 命令）弹出对话框，浏览器端确认 |
+
+### 架构
+
+Web 界面是 Alfred agent 内核之上的轻量 HTTP 包装层：
+
+- **后端**：FastAPI + WebSocket，复用 `chat_turn_stream` + `EventBus`，不重复造轮子
+- **确认桥接**：agent 线程的 `confirm` 回调通过 `threading.Event` 桥接到 WebSocket，实现浏览器端确认
+- **前端**：原生 HTML/CSS/JS（无构建步骤），暗色主题，Markdown 渲染，代码高亮
+- **静态文件**：随包分发（`alfred/webui/`），由 FastAPI 直接 serve
+
+### 安全提示
+
+Web 界面默认绑定 `127.0.0.1`，仅本机可访问。如需局域网访问，显式指定 `--host 0.0.0.0` 并注意安全风险。
+
 ## 记忆系统
 
 ### ① 常驻记忆块（human / persona / lessons）

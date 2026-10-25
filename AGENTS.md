@@ -135,6 +135,20 @@ Alfred/
 │       ├── loader.py       # 扫描 rules/*.md、frontmatter 触发器
 │       └── __init__.py
 │
+│   ├── server/             # Web UI 后端（FastAPI + WebSocket）
+│   │   ├── __init__.py     # 导出 create_app
+│   │   ├── app.py          # FastAPI 应用：REST API + WebSocket 聊天 + 静态文件 serve
+│   │   └── session.py      # WebSession：agent 包装 + confirm 桥接 + 事件序列化
+│   │
+│   ├── webui/              # Web 前端静态文件（HTML/CSS/JS，无构建步骤）
+│   │   ├── index.html      # 单页应用入口
+│   │   └── static/
+│   │       ├── style.css   # 暗色主题样式
+│   │       ├── app.js      # 前端逻辑（WebSocket + 事件渲染 + 会话管理）
+│   │       └── lib/        # marked.js / highlight.js（本地精简版，无外部依赖）
+│
+│   ├── web.py              # 联网工具（web_search / web_fetch，与 server/ 无关）
+│
 ├── rules/                  # 项目级规则文件
 │   └── communication-style.md
 │
@@ -238,6 +252,28 @@ Alfred/
 - `shell`：执行 shell 命令（需用户确认）
 - `run_python`：执行 Python 代码（需用户确认）
 - `code_patch`：自举进化工具，精确替换源代码中的一段文本（需用户确认，三重门禁，单轮最多一次）
+
+### Web UI（`alfred/server/` + `alfred/webui/`）
+
+**后端（`alfred/server/`）：**
+- `app.py`：FastAPI 应用工厂 `create_app()`，提供 REST API（会话/记忆/模型/技能/状态）+ WebSocket 聊天端点 + 静态文件 serve。注意：`/api/memory/lessons` 路由必须在 `/api/memory/{block}` 之前定义，否则 "lessons" 会被 `{block}` 捕获
+- `session.py`：`WebSession` 类，包装 `chat_turn_stream` + `EventBus`，实现 confirm 桥接（agent 线程的 `confirm` 回调通过 `threading.Event` 阻塞，浏览器端 WebSocket 响应通过 `respond_confirm()` 解除阻塞）。事件序列化：`_serialize_event()` 将 EventBus 事件转为 JSON 可传输的字典，ToolCallEnd 结果截断至 3000 字符
+
+**前端（`alfred/webui/`）：**
+- `index.html`：单页应用，三栏布局（侧边栏/消息区/输入区）
+- `style.css`：暗色主题，与 GitHub Dark 风格一致
+- `app.js`：WebSocket 事件流渲染 + 会话管理 + 记忆编辑 + 模型切换。无框架、无构建步骤
+- `lib/`：本地精简版 marked.js（Markdown 渲染）+ highlight.js（代码高亮），无外部 CDN 依赖
+
+**架构要点：**
+- 复用 `chat_turn_stream` + `EventBus`，不重复造轮子
+- 确认桥接：agent 线程同步阻塞 ↔ WebSocket 异步响应，通过 `threading.Event` + `threading.Lock` 实现线程安全
+- 事件通过 `asyncio.Queue` 从后台线程转发到 WebSocket 处理协程（`call_soon_threadsafe`）
+- 默认绑定 `127.0.0.1`，仅本机可访问
+
+**CLI 入口：**
+- `alfred web [--host] [--port] [--reload]`：启动 Web 服务器，默认端口 8080
+- 依赖 `fastapi>=0.115` + `uvicorn[standard]`，通过 `pip install alfred[web]` 安装
 
 ### 会话历史（`alfred/history.py`）
 - `SessionInfo`：会话元信息 dataclass（id / mtime / msg_count / title / title_auto）；`list_sessions` 返回 `list[SessionInfo]`（不再是 3 元组）
@@ -352,6 +388,8 @@ python -m pytest tests/ -q
 - `test_memory_dedup.py`：add_fact 写入前去重（Jaccard 阈值校准、离线/检索失败路径、consolidate 集成）
 - `test_notes_catalog.py`：笔记目录条目抽取、渲染封顶、ingest 集成与失败容错
 - `test_codebase_index.py`：代码库索引 docstring 抽取、__pycache__ 跳过、mtime 失效重建
+- `test_web_api.py`：Web API 端点测试（会话/记忆/状态/技能/whoami/静态文件），23 个用例
+- `test_web_session.py`：WebSession 事件序列化 + 确认桥接测试，15 个用例（3 个多线程测试在 Windows 环境下跳过）
 
 **约束**：测试不依赖真实 LLM 调用、不下载 embedding 模型、不访问外部 API。
 
@@ -419,6 +457,7 @@ data/
 - **换 embedding 模型必须重建索引**：`models.embed.name` 一旦确定不要轻易更换，否则 notes/frameworks/episodes 向量库需要全量重建。
 - **mem0 初始化失败降级但可见**：`longterm.py` 初始化失败会标记 `_init_failed` 并记录 `_init_error`，后续记忆写入/召回空执行，不阻塞对话；但失败不再是静默的——`memory_search` 在召回为空且确认离线时返回明确诊断，`/status` 显示记忆层状态（`init_status()` / `peek_client()`，后者只读缓存不触发懒加载）。常见原因是 Qdrant 本地存储残留 `.lock` 文件（异常退出导致），`get_client` 已支持自动清理锁文件并重试一次。
 - **mem0 Qdrant 锁文件残留**：如果 `alfred memory list` 长期为空且对话看似有记忆（实际是会话历史），检查 `data/vectordb/qdrant_mem0/.lock` 是否存在。`get_client` 会自动清理，若仍失败可手动删除该文件后重启。
+- **Windows 上 `sync pull` 删只读文件报 WinError 5**：`data/memory/.git/objects/` 下的 git 对象文件是只读的，`shutil.rmtree` 裸调用会抛 `PermissionError`。`sync.py` 的 `_rmtree()` 带错误处理（去掉只读属性后重试），删本地目录必须走它。
 - **consolidate 把元数据文件当会话读崩**：`consolidate_state.jsonl` / `consolidate_pending.jsonl` 与会话 JSONL 同目录，`list_sessions` 曾用裸 `*.jsonl` glob 把元数据文件列入，导致 `Message(**record)` 遇未知字段（如 `drafts`）抛 TypeError，`alfred consolidate` 与自动复盘必崩。已在 `history.py` 排除这两个文件名；**新增会话目录内 JSONL 类型时同步更新排除清单**。
 - **persona 和 human 修改都需要用户确认**：agent 调用 `memory_update_block(name="persona")` 或 `memory_update_block(name="human")` 时，若 `deps.confirm` 返回 False 则写入被拒绝。
 - **压缩会作废 llm_state**：`compaction.py` 蒸馏旧消息后调用 `session.rewrite()`，跨模型精确续跑回退为"摘要 + 近期消息"的种子上下文。压缩前已对长消息做过裁剪，蒸馏时不再二次截断。
