@@ -1337,8 +1337,8 @@ def web_ui(
 ):
     """启动 Web 界面（浏览器访问 http://127.0.0.1:8080）。"""
     try:
+        import fastapi  # noqa: F401
         import uvicorn
-        from .server.app import create_app
     except ImportError:
         console.print(
             "[red]Web 界面需要安装 web 依赖：[/red]\n"
@@ -1351,12 +1351,14 @@ def web_ui(
         console.print("[yellow]警告：--reload 与 --workers 不兼容，已忽略 workers[/yellow]")
         workers = 1
 
-    app = create_app()
     console.print(f"[green]启动 Alfred Web UI:[/green] http://{host}:{port}")
     console.print(f"[dim]进程数: {workers} | 按 Ctrl+C 停止服务器[/dim]\n")
 
+    # workers/reload 都要求应用以 import string 传入，传实例会被 uvicorn
+    # 静默回退为单进程；create_app 无参可调用，用 factory 模式。
     uvicorn.run(
-        app,
+        "alfred.server.app:create_app",
+        factory=True,
         host=host,
         port=port,
         reload=reload,
