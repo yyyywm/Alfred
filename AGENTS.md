@@ -389,7 +389,7 @@ python -m pytest tests/ -q
 - `test_notes_catalog.py`：笔记目录条目抽取、渲染封顶、ingest 集成与失败容错
 - `test_codebase_index.py`：代码库索引 docstring 抽取、__pycache__ 跳过、mtime 失效重建
 - `test_web_api.py`：Web API 端点测试（会话/记忆/状态/技能/whoami/静态文件），23 个用例
-- `test_web_session.py`：WebSession 事件序列化 + 确认桥接测试，15 个用例（3 个多线程测试在 Windows 环境下跳过）
+- `test_web_session.py`：WebSession 事件序列化 + 确认桥接 + run_turn 事件流回归测试，24 个用例（3 个多线程测试在 Windows 环境下跳过）
 
 **约束**：测试不依赖真实 LLM 调用、不下载 embedding 模型、不访问外部 API。
 
@@ -468,6 +468,7 @@ data/
 - **Rich Live 的流重定向与 devnull 窗口交错会救回已关闭的 devnull**：`console.status()`/Live 在 start() 时把 sys.stdout 存为"原流"并换成内部 FileProxy，stop() 无条件装回。mem0 redirect 窗口可持续数十秒：status 在窗口内 start → Live 保存的"原流"是 devnull → 窗口退出关闭 devnull → stop() 把已关闭的 devnull 装回 sys.stdout → 主线程 console.print 崩 `ValueError: I/O operation on closed file`（2026-09-10 chat 崩溃根因）。**所有 status 必须经 `cli.py` 的 `_make_status()` 构造**（禁用 Live 的流重定向；注意 rich>=14 的 `Status` 组合了内部 `Live`，标志要设在 `status._live` 上）。回归测试：`tests/test_status_io_race.py`。
 - **Windows asyncio Ctrl+C 报错**：`cli.py` 中已设置 `WindowsSelectorEventLoopPolicy()`，避免 prompt-toolkit 在 Ctrl+C 时报 "Cancelling an overlapped future failed"。
 - **手动标题永不被自动概括覆盖**：自动标题走 `set_title_if_absent`（`_meta_lock` 保护的原子 check-and-set），已有标题（含自动标题）一律不覆盖；自动生成失败静默降级，记 `alfred.chat.titles` logger 进 alfred.log，不碰终端、不阻塞对话。
+- **`chat_turn_stream` 是生成器，调用后必须迭代才会执行**：函数体内才创建 `_run` 线程并启动 agent 循环，光调用不迭代 → 线程永不启动、零事件产生。`WebSession.run_turn` 曾因不迭代且不传 `bus`，导致 Web UI 发出提问后事件队列永远为空、浏览器卡在"思考中…"不结束（修复：迭代生成器排空 + 传入 `bus=bus` 使 `_on_event` 收到事件）。同理 `chat_turn()` 与 CLI 都是 `for event in chat_turn_stream(...)` 迭代使用。回归测试：`tests/test_web_session.py::TestRunTurn`。
 
 ## 部署与分发
 

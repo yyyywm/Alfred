@@ -13,6 +13,7 @@ from alfred.config import Config
 from alfred.events import (
     AssistantChunk,
     ContextCompacted,
+    EventBus,
     ToolCallEnd,
     ToolCallStart,
     ToolDenied,
@@ -243,3 +244,110 @@ class TestConfirmBridge:
         assert evt["tool_name"] == "shell"
         bridge.respond(evt["id"], True)
         thread.join(timeout=5)
+
+
+# ── run_turn 事件流测试（回归：生成器必须被迭代，否则事件不流出） ──
+
+class TestRunTurn:
+    """回归：run_turn 必须迭代 chat_turn_stream 生成器，否则内部 _run 线程不启动、
+    事件不流出，浏览器端卡在"思考中…"永不结束。
+
+    不绑定事件循环（_loop is None），_emit_to_queue 走 put_nowait 同步路径，
+    无时序依赖、Windows 可运行。
+    """
+
+    def _make_session(self, tmp_path):
+        from alfred.server.session import WebSession
+        # 刻意不调用 bind_loop：_loop 为 None 时 _emit_to_queue 用 put_nowait，
+        # 使测试无需真实事件循环即可确定性地断言事件已入队。
+        return WebSession(_make_config(tmp_path))
+
+    def _fake_stream(self, events):
+        """模仿真实 chat_turn_stream：每个事件既 emit 到 bus（→ _on_event →
+        event_queue）又 yield（供 run_turn 排空以阻塞到轮次结束）。"""
+        def gen(agent, deps, session, user_input, bus=None):
+            b = bus or EventBus()
+            for ev in events:
+                b.emit(ev)
+                yield ev
+        return gen
+
+    def test_run_turn_forwards_events_to_queue(self, tmp_path):
+        """事件应完整流到 event_queue（修复前：队列始终为空，UI 卡死）。"""
+        ws = self._make_session(tmp_path)
+        events = [
+            TurnStart(session_id="s", user_text="hi"),
+            AssistantChunk(session_id="s", delta="hello"),
+            TurnEnd(session_id="s", usage=None),
+        ]
+        with patch("alfred.server.session.chat_turn_stream", self._fake_stream(events)):
+            ws.run_turn("hi")
+
+        delivered = []
+        while not ws.event_queue.empty():
+            delivered.append(ws.event_queue.get_nowait())
+        assert [e["type"] for e in delivered] == ["turn_start", "assistant_chunk", "turn_end"]
+
+    def test_run_turn_passes_bus_to_stream(self, tmp_path):
+        """必须把 bus 传给 chat_turn_stream，否则 _on_event 收不到任何事件。"""
+        ws = self._make_session(tmp_path)
+        seen = {}
+
+        def gen(agent, deps, session, user_input, bus=None):
+            seen["bus"] = bus
+            yield TurnEnd(session_id="s", usage=None)
+
+        with patch("alfred.server.session.chat_turn_stream", gen):
+            ws.run_turn("hi")
+        assert seen.get("bus") is not None, "run_turn 必须把 bus 传给 chat_turn_stream"
+
+    def test_turn_error_not_duplicated_on_re_raise(self, tmp_path):
+        """生成器发过 TurnError 事件后又抛异常时，不应重复上报 turn_error。"""
+        ws = self._make_session(tmp_path)
+
+        def gen(agent, deps, session, user_input, bus=None):
+            b = bus or EventBus()
+            ev = TurnError(session_id="s", error="boom")
+            b.emit(ev)
+            yield ev
+            raise RuntimeError("boom")
+
+        with patch("alfred.server.session.chat_turn_stream", gen):
+            ws.run_turn("hi")  # 异常已在内部消化，不应向外抛出
+
+        delivered = []
+        while not ws.event_queue.empty():
+            delivered.append(ws.event_queue.get_nowait())
+        assert [e["type"] for e in delivered] == ["turn_error"]
+
+    def test_error_before_any_event_is_reported(self, tmp_path):
+        """生成器尚未发出任何事件就抛异常时，必须上报 turn_error（如压缩阶段失败）。"""
+        ws = self._make_session(tmp_path)
+
+        def gen(agent, deps, session, user_input, bus=None):
+            raise RuntimeError("compaction failed")
+            yield  # 使 gen 成为生成器函数
+
+        with patch("alfred.server.session.chat_turn_stream", gen):
+            ws.run_turn("hi")
+
+        delivered = []
+        while not ws.event_queue.empty():
+            delivered.append(ws.event_queue.get_nowait())
+        assert [e["type"] for e in delivered] == ["turn_error"]
+        assert delivered[0]["error"] == "compaction failed"
+
+    def test_run_turn_noop_when_closed(self, tmp_path):
+        """close() 后 run_turn 应直接返回，不启动轮次、不产生事件。"""
+        calls = {}
+        ws = self._make_session(tmp_path)
+        ws.close()
+
+        def gen(agent, deps, session, user_input, bus=None):
+            calls["called"] = True
+            yield
+
+        with patch("alfred.server.session.chat_turn_stream", gen):
+            ws.run_turn("hi")
+        assert "called" not in calls
+        assert ws.event_queue.empty()

@@ -287,19 +287,32 @@ class WebSession:
             codebase_index=self._codebase_index,
         )
 
+        # chat_turn_stream 是生成器：调用后必须迭代，内部 _run 线程才会启动、
+        # 轮次才会真正执行。传入同一个 bus，使事件经 _on_event → event_queue
+        # 流向 WebSocket（chat_turn_stream 会把该 bus 同时接入内部队列供 yield，
+        # 供此处排空以阻塞到轮次结束）。
+        # terminal_seen 用于去重：异常退出前若已发过 TurnError 事件，则不再重复上报。
+        terminal_seen = False
         try:
-            chat_turn_stream(
+            for event in chat_turn_stream(
                 self.agent,
                 deps,
                 self.session,
                 user_input,
-            )
+                bus=bus,
+            ):
+                if isinstance(event, (TurnEnd, TurnError)):
+                    terminal_seen = True
         except Exception as e:
-            logger.exception("对话轮次异常")
-            self._emit_to_queue({
-                "type": "turn_error",
-                "error": str(e),
-            })
+            if terminal_seen:
+                # TurnError 已随事件流送达浏览器，此处仅记录日志，避免重复上报
+                logger.exception("对话轮次异常（已上报浏览器）")
+            else:
+                logger.exception("对话轮次异常")
+                self._emit_to_queue({
+                    "type": "turn_error",
+                    "error": str(e),
+                })
 
     # ── 模型切换 ──
 
