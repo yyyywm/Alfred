@@ -402,6 +402,7 @@ function clearMessages() {
         <span class="welcome-tag">多模型切换</span>
       </div>
       <p class="welcome-hint">输入消息开始对话，或点击左侧「+」新建会话</p>
+      <p class="welcome-version">v0.1.0</p>
     </div>
   `;
   state.streamingMessage = null;
