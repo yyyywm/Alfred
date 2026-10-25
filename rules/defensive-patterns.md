@@ -77,3 +77,11 @@ alwaysApply: false
 **规则**：任何 `git commit` 前先 `git diff --staged` 扫一遍 IP/key/密码/内网地址；
   敏感配置（服务器地址、密钥路径等）代码里必须支持从 .env 读取
   （如 ALFRED_SYNC_HOST），config.yaml 只留空模板 + 注释指引。
+
+## 14. 定时任务里禁止 sleep 轮询空等长任务；执行一次、汇报、退出
+**来源**：2026-10-17 Notion 周同步定时任务，前台跑完 notion_sync.py（8 分钟）后又
+  后台重跑一遍，随后陷入 Start-Sleep 55 → 查 .sync_state.json → 再 sleep 的
+  空转循环 12 分钟、8+ 轮，用户视角会话完全卡死，最终手动中断。
+**规则**：定时/无人值守任务的模式是「执行 → 一次性检查结果 → 汇报 → 退出」。
+  发现子任务仍在跑时，报告当前进度并结束会话；确需跟进就用 schedule_create
+  几分钟后触发一次新检查，绝不在会话内 sleep 轮询。同一脚本不重复执行。
