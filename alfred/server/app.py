@@ -520,6 +520,10 @@ def create_app(config_path: str | None = None) -> FastAPI:
             logger.exception("WebSocket 会话异常")
             sender_task.cancel()
             receiver_task.cancel()
+        finally:
+            # 连接结束：丢弃后续事件、解除挂起的 confirm（自动拒绝），
+            # 让轮次线程尽快退出，防止队列无限堆积
+            ws_session.close()
 
     return app
 
