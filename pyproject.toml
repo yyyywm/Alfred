@@ -24,6 +24,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+web = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.27",
+    "websockets>=12.0",
+]
 
 [project.scripts]
 alfred = "alfred.cli:app"
@@ -34,3 +39,5 @@ include = ["alfred*"]
 [tool.setuptools.package-data]
 # 内置 skill 随包分发（bundled/<name>/SKILL.md）
 "alfred.skills" = ["bundled/*/SKILL.md"]
+# Web 前端静态文件
+"alfred.webui" = ["**/*"]

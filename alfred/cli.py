@@ -1328,5 +1328,36 @@ def backup(
     )
 
 
+@app.command("web")
+def web_ui(
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="监听地址"),
+    port: int = typer.Option(8080, "--port", "-p", help="监听端口"),
+    reload: bool = typer.Option(False, "--reload", help="开发模式：代码变更自动重载"),
+):
+    """启动 Web 界面（浏览器访问 http://127.0.0.1:8080）。"""
+    try:
+        import uvicorn
+        from .server.app import create_app
+    except ImportError:
+        console.print(
+            "[red]Web 界面需要安装 web 依赖：[/red]\n"
+            "  pip install alfred[web]\n"
+            "  或: pip install fastapi uvicorn websockets"
+        )
+        raise typer.Exit(1)
+
+    app = create_app()
+    console.print(f"[green]启动 Alfred Web UI:[/green] http://{host}:{port}")
+    console.print("[dim]按 Ctrl+C 停止服务器[/dim]\n")
+
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        reload=reload,
+        log_level="info",
+    )
+
+
 if __name__ == "__main__":
     app()
