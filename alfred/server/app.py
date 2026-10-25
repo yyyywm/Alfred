@@ -469,7 +469,9 @@ def create_app(config_path: str | None = None) -> FastAPI:
                                 "error": "当前对话仍在进行中，请等待完成",
                             })
                             continue
-                        turn_task = asyncio.create_task(ws_session.start_turn(text))
+                        turn_task = asyncio.create_task(
+                            asyncio.to_thread(ws_session.start_turn, text)
+                        )
                     elif msg_type == "confirm":
                         confirm_id = msg.get("id", "")
                         approved = msg.get("approved", False)
