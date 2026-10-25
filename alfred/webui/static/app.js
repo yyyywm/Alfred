@@ -112,7 +112,10 @@ function highlightCodeBlocks(html) {
     const parent = block.parentElement;
     if (!parent.classList.contains('hljs')) parent.classList.add('hljs');
     if (window.hljs && hljs.highlight) {
-      try { block.innerHTML = hljs.highlight(block.textContent, block.className).value; } catch {}
+      // 自研 hljs.highlight(text, lang) 直接返回 HTML 字符串（无 .value）
+      const m = (block.className || '').match(/language-(\S+)/);
+      const lang = m ? m[1] : '';
+      try { block.innerHTML = hljs.highlight(block.textContent, lang); } catch {}
     }
   });
   return temp.innerHTML;
