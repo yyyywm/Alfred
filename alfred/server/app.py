@@ -104,12 +104,7 @@ class AppContext:
         self._skill_index = render_skills_index(scan_skills(self.config))
 
         # 教训文本
-        try:
-            text = self.lessons.read().strip()
-        except Exception:
-            text = ""
-        if text and "还没有教训" not in text:
-            self._lessons_text = f"# 你从过去中学到的教训（RefleXion 教训库）\n{text}"
+        self._lessons_text = self._render_lessons_text()
 
         # 规则
         always_rules, recall_rules = render_rules(scan_rules(self.config))
@@ -126,6 +121,20 @@ class AppContext:
             self._codebase_index = ensure_index(self.config)
         except Exception:
             self._codebase_index = ""
+
+    def _render_lessons_text(self) -> str:
+        """从 lessons 文件渲染 prompt 注入文本。"""
+        try:
+            text = self.lessons.read().strip()
+        except Exception:
+            return ""
+        if text and "还没有教训" not in text:
+            return f"# 你从过去中学到的教训（RefleXion 教训库）\n{text}"
+        return ""
+
+    def refresh_lessons(self) -> None:
+        """lessons 经 REST 更新后刷新注入快照（新 WebSession 生效）。"""
+        self._lessons_text = self._render_lessons_text()
 
     def reload_config(self) -> None:
         """重新加载配置（模型切换后需要）。"""
