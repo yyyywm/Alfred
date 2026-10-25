@@ -22,11 +22,14 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import platform
 import posixpath
 import shlex
 import shutil
+import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -299,6 +302,20 @@ def _fetch_marker(config: Config) -> dict | None:
     return marker
 
 
+def _on_rm_readonly(func, path, _exc):
+    """rmtree 错误处理：去掉只读属性后重试（Windows 上 .git/objects 是只读文件）。"""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
+def _rmtree(path: Path) -> None:
+    # onexc 是 3.12+ 的参数名，3.11 用 onerror（签名兼容）
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_on_rm_readonly)
+    else:
+        shutil.rmtree(path, onerror=_on_rm_readonly)
+
+
 def pull(config: Config) -> None:
     """服务器 → 本地：先自动备份本地数据，再拉取解压逐项替换。"""
     host = _require_host(config)
@@ -343,7 +360,7 @@ def pull(config: Config) -> None:
                 continue
             dst = PROJECT_ROOT / it
             if dst.is_dir():
-                shutil.rmtree(dst)
+                _rmtree(dst)
             elif dst.exists():
                 dst.unlink()
             shutil.move(str(src), str(dst))
