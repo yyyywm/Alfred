@@ -28,7 +28,7 @@ web = [
     # 精确锁定：FastAPI 0.116+/Starlette 1.x 移除了 on_startup，会崩溃
     "fastapi==0.115.6",
     "starlette==0.41.3",
-    # factory 模式（workers/reload 需要）自 0.30 起可用
+    # factory 模式（--reload 需要）自 0.30 起可用
     "uvicorn[standard]>=0.30",
     "websockets>=12.0",
 ]

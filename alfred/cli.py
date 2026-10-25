@@ -1336,9 +1336,12 @@ def web_ui(
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="监听地址"),
     port: int = typer.Option(8080, "--port", "-p", help="监听端口"),
     reload: bool = typer.Option(False, "--reload", help="开发模式：代码变更自动重载"),
-    workers: int = typer.Option(1, "--workers", "-w", help="工作进程数（服务器部署建议 2-4）"),
 ):
-    """启动 Web 界面（浏览器访问 http://127.0.0.1:8080）。"""
+    """启动 Web 界面（浏览器访问 http://127.0.0.1:8080）。
+
+    单用户场景固定单进程：会话 JSONL 与 memory git 仓库是单写者设计，
+    多进程并发写不安全（且每进程独立加载静态数据，内存 ×N）。
+    """
     try:
         import fastapi  # noqa: F401
         import uvicorn
@@ -1350,22 +1353,17 @@ def web_ui(
         )
         raise typer.Exit(1)
 
-    if workers > 1 and reload:
-        console.print("[yellow]警告：--reload 与 --workers 不兼容，已忽略 workers[/yellow]")
-        workers = 1
-
     console.print(f"[green]启动 Alfred Web UI:[/green] http://{host}:{port}")
-    console.print(f"[dim]进程数: {workers} | 按 Ctrl+C 停止服务器[/dim]\n")
+    console.print("[dim]单进程模式 | 按 Ctrl+C 停止服务器[/dim]\n")
 
-    # workers/reload 都要求应用以 import string 传入，传实例会被 uvicorn
-    # 静默回退为单进程；create_app 无参可调用，用 factory 模式。
+    # reload 要求应用以 import string 传入，传实例会被 uvicorn
+    # 静默回退；create_app 无参可调用，用 factory 模式。
     uvicorn.run(
         "alfred.server.app:create_app",
         factory=True,
         host=host,
         port=port,
         reload=reload,
-        workers=workers,
         log_level="info",
     )
 
