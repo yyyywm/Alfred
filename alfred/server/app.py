@@ -4,7 +4,7 @@
   - AppContext: 应用启动时一次性加载所有静态数据（配置、技能、规则、索引），
     所有请求共享，避免每个 API 调用/每个 WebSocket 重复 I/O。
   - WebSession 不再单独加载技能/规则/索引，从 AppContext 获取。
-  - config 只加载一次（除非显式调用 reload_config）。
+  - config 只加载一次，模型切换经 AppContext.update_model 线程安全地更新。
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ from ..config import Config, load_config
 from ..history import (
     Session,
     delete_session,
-    get_title,
     list_sessions,
     session_preview,
     set_title,
@@ -58,6 +57,8 @@ class RateLimiter:
             cutoff = now - self._window
             if key in self._requests:
                 self._requests[key] = [t for t in self._requests[key] if t > cutoff]
+                if not self._requests[key]:
+                    del self._requests[key]  # 空键及时删除，防止字典无限增长
             if len(self._requests.get(key, [])) >= self._max:
                 return True
             self._requests.setdefault(key, []).append(now)
@@ -135,11 +136,6 @@ class AppContext:
     def refresh_lessons(self) -> None:
         """lessons 经 REST 更新后刷新注入快照（新 WebSession 生效）。"""
         self._lessons_text = self._render_lessons_text()
-
-    def reload_config(self) -> None:
-        """重新加载配置（模型切换后需要）。"""
-        with self._lock:
-            self.config = load_config(Path(self.config_path) if self.config_path else None)
 
     def get_config(self) -> Config:
         with self._lock:
@@ -242,7 +238,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
     @app.get("/health")
     async def health_check():
         """健康检查端点（供负载均衡器/监控使用）。"""
-        return {"status": "ok", "timestamp": asyncio.get_event_loop().time()}
+        import time
+        return {"status": "ok", "timestamp": time.monotonic()}
 
     # ── 会话管理 REST API ──
 
