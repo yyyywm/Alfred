@@ -14,9 +14,12 @@
     <!-- 侧边栏 -->
     <aside id="sidebar">
       <div class="sidebar-header">
-        <h1 class="logo">Alfred</h1>
+        <div class="logo-wrapper">
+          <span class="logo-icon">🤖</span>
+          <h1 class="logo">Alfred</h1>
+        </div>
         <button id="btn-new-session" class="btn btn-icon" title="新建会话">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
         </button>
@@ -30,6 +33,9 @@
 
       <!-- 会话列表 -->
       <div id="tab-sessions" class="tab-content active">
+        <div class="session-search">
+          <input type="text" id="session-search-input" placeholder="搜索会话…" autocomplete="off">
+        </div>
         <div id="session-list" class="session-list"></div>
       </div>
 
@@ -38,7 +44,7 @@
         <div class="memory-panel">
           <div class="memory-block" data-block="human">
             <div class="memory-block-header">
-              <span class="block-name">用户画像 (human)</span>
+              <span class="block-name">👤 用户画像</span>
               <span class="block-count"></span>
             </div>
             <textarea class="memory-editor" rows="10" placeholder="加载中…"></textarea>
@@ -46,7 +52,7 @@
           </div>
           <div class="memory-block" data-block="persona">
             <div class="memory-block-header">
-              <span class="block-name">人格设定 (persona)</span>
+              <span class="block-name">🎭 人格设定</span>
               <span class="block-count"></span>
             </div>
             <textarea class="memory-editor" rows="8" placeholder="加载中…"></textarea>
@@ -54,7 +60,7 @@
           </div>
           <div class="memory-block" data-block="lessons">
             <div class="memory-block-header">
-              <span class="block-name">教训库 (lessons)</span>
+              <span class="block-name">📖 教训库</span>
               <span class="block-count"></span>
             </div>
             <textarea class="memory-editor" rows="8" placeholder="加载中…"></textarea>
@@ -67,15 +73,15 @@
       <div id="tab-settings" class="tab-content">
         <div class="settings-panel">
           <div class="setting-group">
-            <h3>状态</h3>
+            <h3>📊 状态</h3>
             <div id="status-info" class="status-info">加载中…</div>
           </div>
           <div class="setting-group">
-            <h3>已安装技能</h3>
+            <h3>🧩 已安装技能</h3>
             <div id="skills-list" class="skills-list">加载中…</div>
           </div>
           <div class="setting-group">
-            <h3>Alfred 积累</h3>
+            <h3>📈 Alfred 积累</h3>
             <div id="whoami-info" class="whoami-info">加载中…</div>
           </div>
         </div>
@@ -87,8 +93,14 @@
       <header class="chat-header">
         <div class="chat-title">
           <span id="session-title">新会话</span>
+          <button id="btn-rename-session" class="btn btn-icon" title="重命名会话" style="display:none">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+          </button>
           <button id="btn-delete-session" class="btn btn-icon btn-danger" title="删除会话" style="display:none">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
             </svg>
           </button>
@@ -105,7 +117,13 @@
           <div class="welcome-icon">🤖</div>
           <h2>Alfred</h2>
           <p>你的私人管家 AI — 长期记忆 + 笔记知识库 + 自我进化</p>
-          <p class="welcome-hint">输入消息开始对话，或使用 <code>/</code> 查看命令</p>
+          <div class="welcome-features">
+            <span class="welcome-tag">长期记忆</span>
+            <span class="welcome-tag">笔记 RAG</span>
+            <span class="welcome-tag">自我进化</span>
+            <span class="welcome-tag">多模型切换</span>
+          </div>
+          <p class="welcome-hint">输入消息开始对话，或点击左侧「+」新建会话</p>
         </div>
       </div>
 
@@ -113,7 +131,7 @@
         <div class="input-wrapper">
           <textarea id="user-input" placeholder="输入消息… (Enter 发送, Shift+Enter 换行)" rows="1"></textarea>
           <button id="btn-send" class="btn btn-icon btn-primary" title="发送">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
             </svg>
           </button>
@@ -122,9 +140,27 @@
           <span id="connection-status" class="status-dot status-connected">已连接</span>
           <span class="hint-sep">·</span>
           <span id="turn-status">就绪</span>
+          <span class="hint-sep">·</span>
+          <span class="shortcut-hint"><kbd>Enter</kbd> 发送 <kbd>Shift+Enter</kbd> 换行</span>
         </div>
       </div>
     </main>
+  </div>
+
+  <!-- 重命名弹窗 -->
+  <div id="rename-modal" class="modal-overlay" style="display:none">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <h3>✏️ 重命名会话</h3>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="rename-input" class="rename-input" placeholder="输入新标题…" maxlength="60">
+      </div>
+      <div class="modal-footer">
+        <button id="btn-rename-cancel" class="btn btn-ghost">取消</button>
+        <button id="btn-rename-confirm" class="btn btn-primary">保存</button>
+      </div>
+    </div>
   </div>
 
   <!-- 确认请求弹窗 -->
