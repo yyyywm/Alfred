@@ -36,6 +36,36 @@ logger = logging.getLogger(__name__)
 
 _WEBUI_DIR = Path(__file__).parent.parent / "webui"
 
+# 速率限制配置（每 IP 每分钟最大请求数）
+_RATE_LIMIT_MAX = 120
+_RATE_LIMIT_WINDOW_S = 60
+
+
+class RateLimiter:
+    """简单的内存速率限制器（单进程有效）。"""
+
+    def __init__(self, max_requests: int = _RATE_LIMIT_MAX, window_s: int = _RATE_LIMIT_WINDOW_S):
+        self._max = max_requests
+        self._window = window_s
+        self._requests: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+
+    def is_limited(self, key: str) -> bool:
+        import time
+        now = time.monotonic()
+        with self._lock:
+            # 清理过期记录
+            cutoff = now - self._window
+            if key in self._requests:
+                self._requests[key] = [t for t in self._requests[key] if t > cutoff]
+            if len(self._requests.get(key, [])) >= self._max:
+                return True
+            self._requests.setdefault(key, []).append(now)
+            return False
+
+
+_rate_limiter = RateLimiter()
+
 
 # ── 应用上下文：一次性加载共享数据 ──────────────────────────────────
 
@@ -118,7 +148,71 @@ class AppContext:
 
 def create_app(config_path: str | None = None) -> FastAPI:
     """创建 FastAPI 应用实例。"""
-    app = FastAPI(title="Alfred Web UI", version="0.1.0")
+    app = FastAPI(
+        title="Alfred Web UI",
+        version="0.1.0",
+        docs_url="/docs",      # Swagger UI（开发用）
+        redoc_url=None,         # 关闭 ReDoc 减少体积
+    )
+
+    # ── 生产中间件 ──
+
+    # GZip 压缩（减少带宽，静态文件效果显著）
+    from starlette.middleware.gzip import GZipMiddleware
+    app.add_middleware(GZipMiddleware, minimum_size=500)
+
+    # CORS（允许局域网访问，部署时按需收紧）
+    from starlette.middleware.cors import CORSMiddleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],          # 生产环境改为具体域名
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # 速率限制（防止滥用）
+    @app.middleware("http")
+    async def rate_limit_middleware(request, call_next):
+        # 跳过静态文件和 WebSocket
+        if request.url.path.startswith("/static") or request.url.path.startswith("/ws"):
+            return await call_next(request)
+        client_ip = request.client.host if request.client else "unknown"
+        if _rate_limiter.is_limited(client_ip):
+            return JSONResponse(
+                status_code=429,
+                content={"error": "请求过于频繁，请稍后再试"},
+            )
+        response = await call_next(request)
+        response.headers["X-RateLimit-Limit"] = str(_RATE_LIMIT_MAX)
+        response.headers["X-RateLimit-Window"] = str(_RATE_LIMIT_WINDOW_S)
+        return response
+
+    # 请求日志
+    @app.middleware("http")
+    async def logging_middleware(request, call_next):
+        import time
+        start = time.monotonic()
+        response = await call_next(request)
+        duration_ms = (time.monotonic() - start) * 1000
+        if not request.url.path.startswith(("/static", "/ws", "/docs", "/openapi.json")):
+            logger.info(
+                "%s %s %d %.0fms",
+                request.method,
+                request.url.path,
+                response.status_code,
+                duration_ms,
+            )
+        return response
+
+    # 全局异常处理
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request, exc):
+        logger.exception("未处理异常: %s %s", request.method, request.url.path)
+        return JSONResponse(
+            status_code=500,
+            content={"error": "服务器内部错误", "detail": str(exc)},
+        )
 
     # 挂载静态文件
     if _WEBUI_DIR.exists():
@@ -135,6 +229,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
         if index_file.exists():
             return FileResponse(index_file)
         return JSONResponse({"message": "Alfred Web UI"})
+
+    @app.get("/health")
+    async def health_check():
+        """健康检查端点（供负载均衡器/监控使用）。"""
+        return {"status": "ok", "timestamp": asyncio.get_event_loop().time()}
 
     # ── 会话管理 REST API ──
 
