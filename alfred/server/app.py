@@ -327,6 +327,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     async def api_update_lessons(body: dict[str, Any]):
         content = body.get("content", "")
         ctx.lessons.update(content)
+        ctx.refresh_lessons()  # 刷新注入快照，避免重启前一直用旧文本
         return {"ok": True}
 
     @app.put("/api/memory/{block}")
@@ -430,9 +431,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
             notes_catalog=ctx._notes_catalog,
             codebase_index=ctx._codebase_index,
             blocks=ctx.blocks,
-            lessons=ctx.lessons,
         )
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         ws_session.bind_loop(loop)
 
         await ws.send_json({
@@ -470,7 +470,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
                             })
                             continue
                         turn_task = asyncio.create_task(
-                            asyncio.to_thread(ws_session.start_turn, text)
+                            asyncio.to_thread(ws_session.run_turn, text)
                         )
                     elif msg_type == "confirm":
                         confirm_id = msg.get("id", "")
@@ -483,6 +483,12 @@ def create_app(config_path: str | None = None) -> FastAPI:
                             })
                     elif msg_type == "model":
                         model_ref = msg.get("model", "")
+                        if turn_task and not turn_task.done():
+                            await ws.send_json({
+                                "type": "error",
+                                "error": "对话进行中，无法切换模型",
+                            })
+                            continue
                         try:
                             ctx.update_model(model_ref)
                             ws_session.switch_model(model_ref)
