@@ -8,3 +8,8 @@ __pycache__/
 .env
 .pytest_cache
 .worktrees/
+
+# 系统/工具杂项
+.DS_Store
+nul
+.claude/
