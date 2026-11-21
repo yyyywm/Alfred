@@ -558,25 +558,10 @@ def chat(
     _exit_probe = {"session": session, "turn": 0}
     _install_exit_probes(logger, _exit_probe)
 
-    # 检查是否有历史 session 遗留的到期定时任务（未在当前 session 触发过），
-    # 如果有，以首条用户输入的形式让 agent 主动处理
-    from .schedule import schedule_fire_pending as _fire_pending
-    fired_prompts = []
-    try:
-        fired_prompts = _fire_pending(config)
-    except Exception as exc:
-        logger.warning("启动时检查定时任务失败: %s", exc)
-    if fired_prompts:
-        combined = (
-            "【系统提醒】以下定时任务已到期，请你主动处理：\n"
-            + "\n".join(f"- {p}" for p in fired_prompts)
-        )
-        console.print(f"[bold cyan]⏰ {len(fired_prompts)} 条到期定时任务，将注入首条对话处理[/bold cyan]")
-        # 把首条提示追加到 prompt_session 之前的输入，通过 user_input 注入下一轮
-        # 简单做法：直接在下面 prompt 循环前注入一次
-        _initial_injection = combined
-    else:
-        _initial_injection = None
+    from .schedule import deliver_due
+
+    def show_reminder(entry):
+        console.print(f"⏰ [{entry.id[:8]}] {entry.description}\n{entry.prompt}", markup=False)
 
     prompt_session = PromptSession(
         "你: ",
@@ -589,21 +574,16 @@ def chat(
     listed_sessions: list[SessionInfo] = []
     _title_attempted: set[str] = set()  # 本次运行已触发过标题生成的会话
     while True:
-        # 本轮标题来源（去掉系统注入的原始用户输入）；定时任务注入轮跳过自动标题
-        raw_user_input: str | None = None
-        # 若启动时有到期定时任务，注入为"首条用户输入"自动处理
-        if _initial_injection is not None:
-            user_input = _initial_injection
-            _initial_injection = None
-            console.print(f"[dim]（定时任务自动处理中…）[/dim]")
-        else:
-            try:
-                user_input = prompt_session.prompt().strip()
-            except (EOFError, KeyboardInterrupt):
-                break
-            if not user_input:
-                continue
-            raw_user_input = user_input
+        try:
+            deliver_due(config, show_reminder)
+        except Exception as exc:
+            logger.warning("投递提醒失败，下次会重试: %s", exc)
+        try:
+            user_input = prompt_session.prompt().strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if not user_input:
+            continue
 
         if user_input.startswith("/"):
             cmd, _, arg = user_input.partition(" ")
@@ -752,24 +732,6 @@ def chat(
                 console.print(f"[red]未知命令 {cmd}，输入 /help 查看。[/red]")
             continue
 
-        # 每轮对话前检查是否有到期未触发的定时任务——注入本轮上下文，
-        # 让 agent 有机会主动处理（这是 Alfred "主动行为"的入口）
-        pending_schedule_prompts = []
-        try:
-            from .schedule import schedule_fire_pending
-            pending_schedule_prompts = schedule_fire_pending(config)
-        except Exception as exc:
-            logger.warning("检查定时任务失败: %s", exc)
-        if pending_schedule_prompts:
-            injected = (
-                f"\n\n[系统：以下 {len(pending_schedule_prompts)} 条定时任务已到期，"
-                f"请主动处理]\n"
-                + "\n".join(f"- {p}" for p in pending_schedule_prompts)
-            )
-            user_input = user_input + injected
-            for p in pending_schedule_prompts:
-                console.print(f"[dim]⏰ 定时任务已到期：{p[:60]}[/dim]")
-
         # 分隔用户输入与助手输出
         console.print()
         turn_count += 1
@@ -895,14 +857,12 @@ def chat(
         longterm.add_async(config, user_input, reply)
 
         # 首个无标题会话的首轮完成后，后台自动生成标题（手动标题优先，失败静默）
-        # 标题来源用 raw_user_input（剥离定时任务系统注入）；定时任务注入轮不生成
         if (
-            raw_user_input is not None
-            and session.id not in _title_attempted
+            session.id not in _title_attempted
             and get_title(config, session.id) is None
         ):
             _title_attempted.add(session.id)
-            titles.maybe_generate_title_async(config, session.id, raw_user_input, reply)
+            titles.maybe_generate_title_async(config, session.id, user_input, reply)
 
         # 记录对话轮数，供 consolidate_state 判断是否自动触发
         from .memory import consolidate_state

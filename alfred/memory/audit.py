@@ -56,6 +56,7 @@ class MemoryAuditReport:
         # 日程/目标
         self.stale_goals_count: int = 0
         self.schedules_count: int = 0
+        self.reminders_needing_retry: int = 0
 
         # 诊断
         self.diagnostics: list[str] = []
@@ -91,6 +92,7 @@ class MemoryAuditReport:
             },
             "stale_goals": self.stale_goals_count,
             "schedules": self.schedules_count,
+            "reminders_needing_retry": self.reminders_needing_retry,
             "diagnostics": self.diagnostics,
         }
 
@@ -244,6 +246,9 @@ def audit(config, days: int = 90) -> MemoryAuditReport:
     try:
         sched = _schedule_list(config)
         report.schedules_count = sched.get("count", 0)
+        report.reminders_needing_retry = sum(
+            row.get("status") in {"delivering", "failed"} for row in sched.get("entries", [])
+        )
     except Exception:
         pass
 
@@ -345,6 +350,8 @@ def format_audit_human(report: MemoryAuditReport) -> str:
     lines.append(f"[bold]冷笔记[/bold] {len(report.cold_notes)} 个")
     lines.append(f"[bold]未使用规则[/bold] {len(report.inactive_rules)} 条")
     lines.append(f"[bold]过期目标[/bold] {report.stale_goals_count} 个")
+    if report.reminders_needing_retry:
+        lines.append(f"[bold]待重投提醒[/bold] {report.reminders_needing_retry} 条")
 
     if report.diagnostics:
         lines.append("")

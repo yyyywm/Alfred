@@ -553,7 +553,7 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
 
         Args:
             description: 任务描述（给用户看）
-            prompt: 到期时注入 agent 的提示（用第一人称，agent 视角）
+            prompt: 到期时显示给用户的提醒正文，不会自动执行工具
             due_at: 到期时间，格式 YYYY-MM-DD HH:MM。不传默认 24 小时后。
         """
         from .schedule import schedule_create as do_create

@@ -323,11 +323,10 @@ Alfred/
 4. 用户下次进入 chat 运行 `/consolidate-review` 查看暂存草稿，再手动 `alfred consolidate` 逐项确认
 
 **主动行为入口**（让 Alfred 从"问答机"变"管家"）：
-- **schedule_fire_pending**：CLI 每轮对话前检查全局定时任务，已到期任务以系统提示注入 agent 上下文，让 agent 主动处理
-- **启动注入**：chat 启动时若有历史遗留到期任务，作为首条"用户输入"自动处理，agent 无需用户主动开口
+- **deliver_due**：CLI 启动及等待输入前投递纯文本；投递中和失败状态可续投，成功输出后才标记 `fired`。不得把提醒注入 Agent 或重放工具。
 - **跨 session 全局可见**：schedule 数据存全局 JSONL，不绑定 session，换 session / 重启不丢
 - **save_episode 工具**：agent 成功完成任务后主动调用，把经验沉淀为情景记忆四元组（配合 consolidate 自动萃取形成闭环）
-- **自动会话标题**：首轮对话完成后 `titles.py` 后台 daemon 线程用 `models.chat` 概括 ≤15 字标题，已有标题（含自动标题）永不覆盖；`/title` 手动设置优先，定时任务注入轮不生成标题
+- **自动会话标题**：首轮对话完成后 `titles.py` 后台 daemon 线程用 `models.chat` 概括 ≤15 字标题，已有标题（含自动标题）永不覆盖；`/title` 手动设置优先，纯文本提醒不生成标题
 
 ### 知识层（`alfred/knowledge/`）
 - `chunking.py`：按 Markdown 标题层级切分，保留标题路径前缀，解析 frontmatter

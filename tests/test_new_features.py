@@ -268,11 +268,9 @@ def test_generate_drafts_passes_large_max_tokens(tmp_path, monkeypatch):
     assert drafts == {"memory_entries": [], "human_block_update": None}
 
 
-# ── P1: schedule_fire_pending 跨 session ──────────────────────────────
-
-def test_schedule_fire_pending_fires_and_marks(tmp_path):
-    """到期任务应返回 prompt 并标记为 fired。"""
-    from alfred.schedule import schedule_create, schedule_fire_pending
+def test_deliver_due_fires_and_marks(tmp_path):
+    """到期任务应投递文本并标记为 fired。"""
+    from alfred.schedule import deliver_due, schedule_create
 
     cfg = Config(paths={"history_dir": str(tmp_path / "hist")})
 
@@ -281,20 +279,21 @@ def test_schedule_fire_pending_fires_and_marks(tmp_path):
     assert result["ok"]
     assert "已创建" in result["message"]
 
-    prompts = schedule_fire_pending(cfg)
+    prompts = []
+    assert deliver_due(cfg, lambda entry: prompts.append(entry.prompt)) == 1
     assert prompts == ["fire me!"]
 
-    assert schedule_fire_pending(cfg) == []
+    assert deliver_due(cfg, prompts.append) == 0
 
 
-def test_schedule_fire_pending_ignores_future(tmp_path):
+def test_deliver_due_ignores_future(tmp_path):
     """未到期的任务不应被 fire。"""
     import time
-    from alfred.schedule import schedule_create, schedule_fire_pending
+    from alfred.schedule import deliver_due, schedule_create
 
     cfg = Config(paths={"history_dir": str(tmp_path / "hist")})
     future = time.time() + 86400 * 7
 
     schedule_create(cfg, "sess1", "future task", "future prompt",
                     due_at=future)
-    assert schedule_fire_pending(cfg) == []
+    assert deliver_due(cfg, lambda entry: pytest.fail("unexpected delivery")) == 0

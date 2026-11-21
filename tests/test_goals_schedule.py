@@ -9,7 +9,7 @@ import pytest
 
 from alfred.config import Config
 from alfred.goals import GoalStatus, create_goal, get_goal, update_goal
-from alfred.schedule import schedule_create, schedule_delete, schedule_list, schedule_fire_pending
+from alfred.schedule import deliver_due, schedule_create, schedule_delete, schedule_list
 
 
 @pytest.fixture()
@@ -139,10 +139,17 @@ class TestSchedule:
         r = schedule_delete(tmp_config, "xxxx")
         assert not r["ok"]
 
-    def test_fire_pending(self, tmp_config):
-        r = schedule_create(tmp_config, "s1", "A", "该复盘了", due_at=0.0)
-        fired = schedule_fire_pending(tmp_config)
-        assert "该复盘了" in fired
-        # 第二次调用不应重复触发
-        fired2 = schedule_fire_pending(tmp_config)
-        assert fired2 == []
+    def test_delivery_retries_and_acknowledges(self, tmp_config):
+        schedule_create(tmp_config, "s1", "A", "该复盘了", due_at=0.0)
+        seen = []
+
+        def interrupted(entry):
+            assert schedule_list(tmp_config)["entries"][0]["status"] == "delivering"
+            raise OSError("terminal unavailable")
+
+        with pytest.raises(OSError):
+            deliver_due(tmp_config, interrupted)
+        assert schedule_list(tmp_config)["entries"][0]["status"] == "failed"
+        assert deliver_due(tmp_config, lambda entry: seen.append(entry.prompt)) == 1
+        assert seen == ["该复盘了"]
+        assert deliver_due(tmp_config, seen.append) == 0

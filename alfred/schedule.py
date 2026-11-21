@@ -3,18 +3,17 @@
 设计依据：
 - DeepSeek-Harness schedule_create/schedule_delete/schedule_list 工具
 - Alfred 当前 cronjob 只能由 Hermes 侧管理，agent 内部无法 self-schedule
-- 轻量实现：全局 JSONL 文件持久化，不依赖外部 cron，由
-  Alfred 启动时（chat 命令）与每轮对话前加载已到期任务注入 prompt 实现"定时提醒"。
-- 跨 session 全局化：一次创建的 schedule 在任意 session 都能看到和触发，
-  到期后全局标记 fired（而不是 session 独占），避免换 session 就丢失。
-
-注意：真正的定时执行仍需要 Hermes 侧 cron 触发；本模块负责 agent 侧的
-声明与持久化。schedule_fire_pending 是全局入口，供 CLI 调用。
+- 全局 JSONL 持久化；CLI 启动和每次等待输入前投递提醒文本。
+- 展示成功后才标记 fired；重试不运行 agent 或工具。
 """
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+import os
+import sqlite3
+from contextlib import closing
+from functools import wraps
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -31,8 +30,8 @@ class ScheduleEntry:
     user_id: str  # session_id 作为 user_id
     description: str
     due_at: float  # 到期时间（unix timestamp）
-    prompt: str  # 到期时注入 agent 的 prompt
-    status: str = "active"  # active / fired / cancelled
+    prompt: str
+    status: str = "active"
     last_fired: float | None = None
 
 
@@ -63,11 +62,24 @@ def _load_all(config: Config) -> list[ScheduleEntry]:
 
 def _save_all(config: Config, entries: list[ScheduleEntry]) -> None:
     path = _schedule_path(config) / "schedules.jsonl"
-    with path.open("w", encoding="utf-8") as f:
+    temp = path.with_suffix(".tmp")
+    with temp.open("w", encoding="utf-8") as f:
         for e in entries:
             f.write(json.dumps(asdict(e), ensure_ascii=False) + "\n")
+    os.replace(temp, path)
 
 
+def _serialized(operation):
+    @wraps(operation)
+    def run(config, *args, **kwargs):
+        with closing(sqlite3.connect(_schedule_path(config) / "delivery.lock")) as lock:
+            lock.execute("BEGIN EXCLUSIVE")
+            return operation(config, *args, **kwargs)
+
+    return run
+
+
+@_serialized
 def schedule_create(config: Config, session_id: str,
                     description: str, prompt: str,
                     due_at: float | None = None) -> dict[str, Any]:
@@ -96,6 +108,7 @@ def schedule_create(config: Config, session_id: str,
     }
 
 
+@_serialized
 def schedule_delete(config: Config, schedule_id: str) -> dict[str, Any]:
     """取消一条定时任务。"""
     entries = _load_all(config)
@@ -133,18 +146,25 @@ def schedule_list(config: Config, session_id: str | None = None) -> dict[str, An
     return {"count": len(rows), "entries": rows}
 
 
-def schedule_fire_pending(config: Config) -> list[str]:
-    """返回所有已到期且未触发的 active 任务的 prompt，并将它们标记为 fired。
-
-    供 Alfred 启动时调用，把到期任务注入 agent 的 prompt。
-    """
+@_serialized
+def deliver_due(config: Config, notify) -> int:
+    """Deliver text only; never hand a retryable reminder to the agent as a task."""
     now = datetime.now(timezone.utc).timestamp()
     entries = _load_all(config)
-    fired_prompts: list[str] = []
-    for e in entries:
-        if e.status == "active" and e.due_at <= now:
-            e.status = "fired"
-            e.last_fired = now
-            fired_prompts.append(e.prompt)
-    _save_all(config, entries)
-    return fired_prompts
+    delivered = 0
+    for entry in entries:
+        if entry.due_at > now or entry.status not in {"active", "delivering", "failed"}:
+            continue
+        entry.status = "delivering"
+        _save_all(config, entries)
+        try:
+            notify(entry)
+        except Exception:
+            entry.status = "failed"
+            _save_all(config, entries)
+            raise
+        entry.status = "fired"
+        entry.last_fired = now
+        _save_all(config, entries)
+        delivered += 1
+    return delivered
