@@ -558,7 +558,10 @@ def chat(
     _exit_probe = {"session": session, "turn": 0}
     _install_exit_probes(logger, _exit_probe)
 
+    from .memory.review_queue import kick
     from .schedule import deliver_due
+
+    kick(config)
 
     def show_reminder(entry):
         console.print(f"⏰ [{entry.id[:8]}] {entry.description}\n{entry.prompt}", markup=False)
@@ -589,23 +592,6 @@ def chat(
             cmd, _, arg = user_input.partition(" ")
             arg = arg.strip()
             if cmd in ("/exit", "/quit"):
-                # 退出前提示待审查的草稿（不阻塞，自动 consolidate 走后台线程）
-                try:
-                    from .memory import consolidate_state
-                    from .memory.consolidate_state import should_auto_consolidate
-                    pending_path = config.path(config.paths.history_dir) / "consolidate_pending.jsonl"
-                    has_pending = pending_path.exists() and pending_path.stat().st_size > 0
-                    auto_will_run = should_auto_consolidate(config, turn_count)
-                    if auto_will_run:
-                        console.print(
-                            "[dim]💤 满足自动复盘条件，将在后台运行 consolidate（稍后 /consolidate-review 可查看结果）。[/dim]"
-                        )
-                    elif has_pending:
-                        console.print(
-                            "[dim]💤 有待审查的草稿，运行 /consolidate-review 查看。[/dim]"
-                        )
-                except Exception as e:
-                    logger.warning("退出前复盘检测失败: %s", e)
                 break
             elif cmd == "/help":
                 console.print(__doc__)
@@ -853,9 +839,6 @@ def chat(
         reply = "".join(reply_parts)
         logger.info("第 %d 轮回复完成，长度: %d", turn_count, len(reply))
 
-        # hot path 结束后，后台异步沉淀长期记忆
-        longterm.add_async(config, user_input, reply)
-
         # 首个无标题会话的首轮完成后，后台自动生成标题（手动标题优先，失败静默）
         if (
             session.id not in _title_attempted
@@ -863,10 +846,6 @@ def chat(
         ):
             _title_attempted.add(session.id)
             titles.maybe_generate_title_async(config, session.id, user_input, reply)
-
-        # 记录对话轮数，供 consolidate_state 判断是否自动触发
-        from .memory import consolidate_state
-        consolidate_state.record_turn(config, session.id, turn_count)
 
         # 每 N 轮提示用户考虑复盘（不强制，只是把动作浮出水面）
         if turn_count % _CONSOLIDATE_REMINDER_EVERY == 0:
@@ -876,31 +855,6 @@ def chat(
             )
 
     logger.info("会话结束: %s, 总轮数: %d", session.id, turn_count)
-
-    # 自动触发 consolidate：满足条件时在后台运行无人值守模式
-    # 用线程包装，避免 LLM 调用阻塞 /exit 退出
-    try:
-        from .memory import consolidate_state
-        if consolidate_state.should_auto_consolidate(config, turn_count):
-            logger.info("会话结束，满足自动复盘条件，后台启动无人值守 consolidate")
-            import threading as _threading
-
-            def _auto_consolidate_run() -> None:
-                try:
-                    from .memory.consolidate import apply_unattended, generate_drafts
-                    drafts = generate_drafts(config)
-                    if drafts and "error" not in drafts:
-                        applied = apply_unattended(config, drafts)
-                        if applied:
-                            logger.info("无人值守 consolidate 已应用: %s", applied)
-                        consolidate_state.record_consolidate(config)
-                except Exception as exc:
-                    logger.warning("无人值守 consolidate 失败: %s", exc)
-
-            thread = _threading.Thread(target=_auto_consolidate_run, daemon=True)
-            thread.start()
-    except Exception as e:
-        logger.warning("自动 consolidate 触发失败（不影响会话）: %s", e)
 
     console.print("[dim]再见。[/dim]")
 
@@ -948,14 +902,12 @@ def _show_consolidate_pending(config) -> None:
     from datetime import datetime as _dt
     import json as _json
     from pathlib import Path as _Path
+    from .memory.review_queue import reviews
 
     pending_path = _Path(config.path(config.paths.history_dir)) / "consolidate_pending.jsonl"
-    if not pending_path.exists():
-        console.print("[dim]没有待审查的草稿。[/dim]")
-        return
-
-    entries = []
-    for line in pending_path.read_text(encoding="utf-8").strip().split("\n"):
+    entries = [dict(record, batch_id=key) for key, record in reviews(config)]
+    legacy = pending_path.read_text(encoding="utf-8").splitlines() if pending_path.exists() else []
+    for line in legacy:
         if not line.strip():
             continue
         entries.append(_json.loads(line))
@@ -969,6 +921,13 @@ def _show_consolidate_pending(config) -> None:
         ts = _dt.fromtimestamp(entry["ts"])
         console.print(f"\n--- #{idx}  {ts:%m-%d %H:%M} ---")
         drafts = entry["drafts"]
+        if entry.get("batch_id"):
+            console.print(f"  批次：{entry['batch_id']}")
+        for item in drafts.get("corrections") or []:
+            console.print(
+                f"  纠正：{item['replaces']} → {item['text']}\n"
+                f"  来源 {item['ref']}：{item['quote']}", markup=False,
+            )
         for entry_text in drafts.get("memory_entries") or []:
             console.print(f"  📝 记忆条目：{entry_text[:100]}")
         hu = drafts.get("human_block_update")
@@ -982,8 +941,8 @@ def _show_consolidate_pending(config) -> None:
             console.print(f"  🗑  过时记忆：{stale[:80]}")
 
     console.print("\n[dim]处理建议：[/dim]")
-    console.print("  - 运行 [bold]alfred consolidate[/bold] 逐项确认应用")
-    console.print("  - 或编辑 [dim]data/history/consolidate_pending.jsonl[/dim] 手动清理")
+    console.print("  - 运行 [bold]alfred consolidate --review[/bold] 逐项确认新批次")
+    console.print("  - 旧版草稿仍保留在 consolidate_pending.jsonl")
 
 
 def _remember(config, blocks: MemoryBlocks, content: str) -> None:
@@ -1200,11 +1159,40 @@ def frameworks(query: str = typer.Argument(..., help="检索词")):
 
 
 @app.command()
-def consolidate():
+def consolidate(
+    queued: bool = typer.Option(False, "--queued", help="立即处理一个持久化复盘批次"),
+    review: bool = typer.Option(False, "--review", help="逐项确认已暂存的新批次"),
+):
     """睡眠整理：复盘近期对话，产出记忆/规则草稿（确认后入库）。"""
     from .memory.consolidate import apply_drafts, generate_drafts
 
     config = load_config()
+    if queued and review:
+        raise typer.BadParameter("--queued 与 --review 不能一起使用")
+    if queued:
+        from .memory.review_queue import run, status
+
+        try:
+            with _make_status("[dim]正在处理持久化复盘队列…[/dim]"):
+                completed = run(config, force=True)
+        except Exception:
+            console.print("[red]复盘未完成，批次已保留；使用 alfred audit 查看状态。[/red]")
+            raise typer.Exit(1)
+        console.print("完成一个复盘批次。" if completed else "没有待处理批次，或已有工作线程。")
+        console.print(f"待复盘轮次：{status(config)['pending']}")
+        return
+    if review:
+        from .memory.review_queue import dismiss_review, reviews
+
+        pending = reviews(config)
+        if not pending:
+            console.print("没有待审查的新批次。")
+        for batch_id, entry in pending:
+            for item in apply_drafts(config, entry["drafts"], confirm=_confirm):
+                console.print(item, markup=False)
+            if _confirm(f"关闭待审批次 {batch_id}？未批准的草稿将一并丢弃。"):
+                dismiss_review(config, batch_id)
+        return
     with _make_status("[dim]复盘中（使用记忆写入模型）…[/dim]"):
         drafts = generate_drafts(config)
     if not drafts:

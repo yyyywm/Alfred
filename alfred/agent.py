@@ -69,7 +69,7 @@ INSTRUCTIONS = """你是用户的私人管家——也是秘书和朋友。你�
 ## 行为准则
 - 诚实直接：有不同意见就说出来并给出理由，不一味迎合
 - 记住重要的事：用户透露个人信息、偏好、经历、决策时，用 memory_update_block 更新 human 块；细节事实靠记忆系统自动沉淀，human 块只留高信号画像
-- 需要回忆时用 memory_search；用户提到自己笔记里可能有的内容时用 notes_search
+- 回顾或概览用 memory_search / notes_search；核对原话、精确参数或纠正时用 session_search（跨会话 scope="all"），不要把摘要当原始证据。
 - 回答个性化问题时，说明你依据了哪些记忆（用户有权知道）
 - **主动提及，不要等问**：当你已经知道的信息会帮助用户做更好的决定时（比如用户要选书而你记得 TA 读过的相关书、用户要排计划而你记得 TA 的作息、用户要讨论某个话题而你了解 TA 的立场），主动说出来，不要等用户追问才知道你知道。这是管家和搜索引擎的区别——管家应该替用户把相关背景带到桌上。
 - **情景记忆要主动写**：当你成功完成了一个有代表性的任务（成功 debug、给用户提出了被采纳的方案、解决了棘手问题），用 `save_episode` 把经验存下来（场景/思路/行动/结果），下次类似情况会自动召回借鉴。只保存**成功**的案例。
@@ -492,12 +492,29 @@ def build_agent(config: Config, model_ref: str | None = None) -> Agent[AlfredDep
     # 长会话中 agent 会"忘记"前面的工具输出，提供回查能力
 
     def session_search(ctx: RunContext[AlfredDeps], query: str,
-                       limit: int = 5) -> str:
-        """搜索当前会话历史中的消息内容。
+                       limit: int = 5, scope: str = "current", source_ref: str = "") -> str:
+        """搜索原始对话；scope='all' 搜索所有新归档轮次，source_ref 可精确查看出处。
 
         适用于长会话中需要回想自己之前做过什么、用过什么工具、
         得到过什么结论时使用。"""
         from .history import Session
+        from .memory.review_queue import originals
+
+        if scope not in ("current", "all"):
+            return "scope 必须是 current 或 all。"
+        limit = max(1, min(limit, 20))
+        rows = originals(
+            ctx.deps.config, query, session_id=ctx.deps.session_id if scope == "current" else None,
+            limit=limit, source_ref=source_ref or None,
+        )
+        if rows:
+            user_limit = 4000 if source_ref else 1500
+            return "\n\n---\n\n".join(
+                f"[原文 {ref}]\n[user] {user[:user_limit]}\n[assistant] {reply[:1000]}"
+                for ref, user, reply in rows
+            )
+        if scope == "all" or source_ref:
+            return "新归档的对话中未找到原文；旧会话可能尚未归档，不能据此断言从未记录。"
         try:
             session = Session(ctx.deps.config, session_id=ctx.deps.session_id)
         except Exception as e:
@@ -896,6 +913,13 @@ def chat_turn_stream(
             session.add_user(user_input)
             session.add_assistant(output, tool_calls=list(turn_deps.tool_records))
             session.set_llm_state(final_result.all_messages_json())
+            from .memory import review_queue
+
+            try:
+                review_queue.enqueue(deps.config, session.id, user_input, output)
+                review_queue.kick(deps.config)
+            except Exception:
+                review_queue.logger.exception("对话历史已保存，但本轮复盘入队失败")
             bus.emit(
                 TurnEnd(
                     session_id=session.id,

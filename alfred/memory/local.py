@@ -99,6 +99,9 @@ class LocalMemoryClient(MemoryClient):
         user_id: str = "owner",
         metadata: dict | None = None,
     ) -> None:
+        if metadata and metadata.get("source_ref"):
+            self._mem.add(messages, user_id=user_id, metadata=metadata, infer=False)
+            return
         # 显式引导 mem0 的提取方向：优先提取用户事实，忽略 agent 内部信息。
         self._mem.add(
             messages,

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
@@ -136,26 +137,34 @@ def _recent_transcripts(config: Config, days: int = 3, max_sessions: int = 5) ->
     return "\n\n".join(parts)
 
 
-def generate_drafts(config: Config) -> dict | None:
+def generate_drafts(config: Config, *, transcripts=None, sources=None) -> dict | None:
     """用强模型复盘近期对话，返回整理草稿 dict（无内容返回 None）。"""
-    transcripts = _recent_transcripts(config)
+    if transcripts is None:
+        transcripts = _recent_transcripts(config)
     if not transcripts:
         return None
 
     existing = longterm.list_all(config)
     existing_text = "\n".join(f"- {m.get('memory', m)}" for m in existing) or "（空）"
     blocks = MemoryBlocks(config)
+    human_before = blocks.read("human")
 
     agent = Agent(
         build_model(config, config.models.memory_write),
         instructions=CONSOLIDATE_INSTRUCTIONS,
     )
     prompt = (
-        f"## 当前 human 块内容\n{blocks.read('human')}\n\n"
+        f"## 当前 human 块内容\n{human_before}\n\n"
         f"## 已有长期记忆\n{existing_text}\n\n"
         f"## 近期对话记录\n{transcripts}\n\n"
         "请输出整理草稿 JSON。"
     )
+    if sources is not None:
+        prompt += (
+            '\n增量模式：memory_entries 中每项用 {"text":"新事实","ref":"来源轮次",'
+            '"quote":"用户原话逐字短引","replaces":null}。只从用户原话提取事实；'
+            '明确纠正旧事实时，replaces 填已有长期记忆的精确原文，不要同时把它放进 stale_memories。'
+        )
     # 思考型模型（如 kimi k3）的 thinking tokens 计入 max_tokens 额度，
     # pydantic-ai 对 AnthropicModel 默认 4096 会把草稿 JSON 截断成非法 JSON；
     # 显式放大预算。16384 对 anthropic 端点需流式请求，pydantic-ai 自动降级处理。
@@ -165,7 +174,35 @@ def generate_drafts(config: Config) -> dict | None:
     if text.startswith("```"):
         text = text.split("\n", 1)[1].rsplit("```", 1)[0]
     try:
-        return json.loads(text)
+        drafts = json.loads(text)
+        if not isinstance(drafts, dict):
+            return {"error": "复盘输出必须是 JSON 对象"}
+        if sources is not None:
+            if drafts.get("human_block_update"):
+                drafts["human_before"] = human_before
+            facts, corrections = {}, []
+            for item in drafts.get("memory_entries") or []:
+                if not isinstance(item, dict):
+                    continue
+                ref, quote, fact = (item.get(key) for key in ("ref", "quote", "text"))
+                if not all(isinstance(value, str) and value.strip() for value in (ref, quote, fact)):
+                    continue
+                if ref not in sources or quote not in sources[ref] or len(quote) > 500:
+                    continue
+                if isinstance(item.get("replaces"), str) and item["replaces"].strip():
+                    corrections.append(item)
+                else:
+                    facts[fact] = {"source_ref": ref, "source_quote": quote}
+            for item in corrections:
+                facts.pop(item["text"], None)
+            drafts["memory_entries"] = list(facts)
+            drafts["fact_sources"] = facts
+            drafts["corrections"] = corrections
+            replaced = {item["replaces"] for item in corrections}
+            drafts["stale_memories"] = [
+                old for old in drafts.get("stale_memories") or [] if isinstance(old, str) and old not in replaced
+            ]
+        return drafts
     except json.JSONDecodeError:
         return {"error": "模型输出不是合法 JSON", "raw": text[:1000]}
 
@@ -174,6 +211,23 @@ def apply_drafts(config: Config, drafts: dict,
                  confirm=lambda msg: False) -> list[str]:
     """逐项确认并应用草稿。返回已应用项的描述列表。"""
     applied: list[str] = []
+
+    for item in drafts.get("corrections") or []:
+        old, fact = item["replaces"], item["text"]
+        if old == fact or not isinstance(old, str):
+            continue
+        if confirm(f"纠正长期记忆？\n旧：{old}\n新：{fact}\n来源 {item['ref']}：{item['quote']}"):
+            result = longterm.add_fact(
+                config, fact, metadata={"source_ref": item["ref"], "source_quote": item["quote"]},
+                exact_only=True,
+            )
+            if result["status"] == "offline":
+                raise RuntimeError("记忆层离线，纠正未应用")
+            for memory in longterm.list_all(config):
+                if memory.get("memory") == old and memory.get("id"):
+                    if not longterm.delete(config, memory["id"]):
+                        raise RuntimeError("未能删除已确认的旧记忆")
+            applied.append(f"记忆纠正：{fact[:50]}（human 块需单独确认）")
 
     for entry in drafts.get("memory_entries") or []:
         if confirm(f"写入长期记忆：\n  {entry}\n确认？"):
@@ -214,7 +268,7 @@ def apply_drafts(config: Config, drafts: dict,
         if confirm(f"删除过时记忆：\n  {stale}\n确认？"):
             # mem0 里按内容找 id 删除
             for m in longterm.list_all(config):
-                if m.get("memory") == stale or stale in str(m.get("memory", "")):
+                if m.get("memory") == stale:
                     if longterm.delete(config, m.get("id")):
                         applied.append(f"删除过时记忆：{stale[:50]}")
                     break
@@ -257,7 +311,7 @@ def apply_drafts(config: Config, drafts: dict,
     return applied
 
 
-def apply_unattended(config: Config, drafts: dict) -> list[str]:
+def apply_unattended(config: Config, drafts: dict, *, batch_id=None) -> list[str]:
     """无人值守模式：自动写入 lessons / memory_entries / episodes，
     human_block_update 视改动大小自动或待审，其余草稿暂存待审查。
 
@@ -289,34 +343,44 @@ def apply_unattended(config: Config, drafts: dict) -> list[str]:
                 result = lessons_block.add(category, lesson, context)
                 applied.append(f"RefleXion 教训：{result}")
             except Exception:
+                if batch_id:
+                    raise
                 pass
 
     # 2) memory_entries 自动写入（用户事实沉淀，非敏感；写入前近重复去重）
     for entry in drafts.get("memory_entries") or []:
         try:
-            result = longterm.add_fact(config, entry)
+            metadata = (drafts.get("fact_sources") or {}).get(entry)
+            result = longterm.add_fact(config, entry, metadata=metadata) if metadata else longterm.add_fact(config, entry)
+            if batch_id and result["status"] == "offline":
+                raise RuntimeError("记忆层离线，自动复盘暂未完成")
             if result["status"] == "added":
                 applied.append(f"记忆条目：{entry[:50]}")
             elif result["status"] == "duplicate":
                 applied.append(f"记忆条目（已存在，跳过）：{entry[:50]}")
         except Exception:
+            if batch_id:
+                raise
             pass
 
     # 3) episodes 自动写入（情景记忆四元组）
     from .episodic import Episode, save_episode as _do_save_episode
 
-    for item in drafts.get("episodes") or []:
+    for index, item in enumerate(drafts.get("episodes") or []):
         try:
             ep = Episode(
                 situation=item.get("situation", ""),
                 thoughts=item.get("thoughts", ""),
                 action=item.get("action", ""),
                 result=item.get("result", ""),
+                episode_id=f"{batch_id}-{index}" if batch_id else "",
             )
             if ep.situation and ep.result:
                 _do_save_episode(config, ep)
                 applied.append(f"情景记忆：{ep.situation[:30]}")
         except Exception:
+            if batch_id:
+                raise
             pass
 
     # 3.5) memory_entries → human block 自动晋升（Updating operation）
@@ -329,7 +393,7 @@ def apply_unattended(config: Config, drafts: dict) -> list[str]:
     # mem0 层（implicit contextual）的发现触发 human block 层（explicit contextual）的更新。
     human_update_draft = drafts.get("human_block_update")
     _facts_promoted = []
-    if not human_update_draft:
+    if not human_update_draft and not drafts.get("corrections"):
         _user_facts_from_memories = _extract_user_facts_from_memories(
             drafts.get("memory_entries") or [],
         )
@@ -344,12 +408,18 @@ def apply_unattended(config: Config, drafts: dict) -> list[str]:
         try:
             blocks = MemoryBlocks(config)
             current = blocks.read("human")
-            current_real = len(
-                current.replace("_（", "").replace("）_", "")
-                .replace("# ", "").replace("\n", "")
+            delta = sum(
+                max(old_end - old_start, new_end - new_start)
+                for op, old_start, old_end, new_start, new_end
+                in SequenceMatcher(None, current, human_update).get_opcodes()
+                if op != "equal"
             )
-            delta = len(human_update) - current_real
-            if abs(delta) <= AUTO_HUMAN_UPDATE_MAX_CHARS:
+            if current == human_update:
+                pass
+            elif (delta <= AUTO_HUMAN_UPDATE_MAX_CHARS
+                  and len(human_update) <= blocks.limit_for("human")
+                  and current == drafts.get("human_before", current)
+                  and not drafts.get("corrections")):
                 result = blocks.update("human", human_update, reason="auto-consolidate")
                 applied.append(str(result))
             else:
@@ -362,6 +432,8 @@ def apply_unattended(config: Config, drafts: dict) -> list[str]:
         pending["rule_suggestions"] = drafts["rule_suggestions"]
     if drafts.get("stale_memories"):
         pending["stale_memories"] = drafts["stale_memories"]
+    if drafts.get("corrections"):
+        pending["corrections"] = drafts["corrections"]
 
     if pending:
         pending_path = (
@@ -369,10 +441,13 @@ def apply_unattended(config: Config, drafts: dict) -> list[str]:
             / "consolidate_pending.jsonl"
         )
         pending_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(pending_path, "a", encoding="utf-8") as f:
-            f.write(_json.dumps({
-                "ts": datetime.now().timestamp(),
-                "drafts": pending,
-            }) + "\n")
+        record = {"ts": datetime.now().timestamp(), "drafts": pending}
+        if batch_id:
+            from .review_queue import save_review
+
+            save_review(config, batch_id, record)
+        else:
+            with open(pending_path, "a", encoding="utf-8") as f:
+                f.write(_json.dumps(record) + "\n")
 
     return applied

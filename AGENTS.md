@@ -312,15 +312,17 @@ Alfred/
 **整理：**
 - `consolidate.py`：sleep-time 整理，产出六类草稿（memory_entries / human_block_update / rule_suggestions / stale_memories / lessons / episodes）；`apply_drafts` 逐项确认后入库（含 episodes，交互模式与无人值守模式的写入路径必须一致，否则 LLM 产出的情景记忆在交互模式下被静默丢弃）；memory_entries 两条写入路径统一走 `longterm.add_fact()`（近重复去重，已存在的条目标记「已存在，跳过」）；`apply_unattended` 无人值守模式**自动写入** lessons + memory_entries + episodes
 - `_apply_user_facts_to_human`：把 memory_entries 中的纯用户事实晋升到 human 块（对齐 Rethinking Memory 的 Updating operation）。章节头只出现一次，空间不足时贪心装入能装下的条目并返回 `[跳过: ...]`，不整批放弃
-- `consolidate_state.py`：append-only JSONL 追踪对话轮数与最近复盘时间；`should_auto_consolidate()` 在 `chat` 退出时判断是否自动触发无人值守 consolidate（阈值：≥3 轮且距上次复盘 >24 小时），后台线程执行不阻塞退出
+- `review_queue.py`：CLI/Web 共用。成功轮次在 `TurnEnd` 前持久化；归档使用独立来源编号，不依赖会话 JSONL 行号或压缩窗口。阈值仍由 `consolidate_state.py` 定义。
 - `audit.py`：记忆审计视图（`alfred audit` / `/audit`），诊断记忆库健康度、工具调用成功率、冷笔记、死规则、过期目标。`days` 时间窗必须贯穿全报告——工具调用统计与 `total_turns` 用同一个 `cutoff`，否则同一份报告里成功率是终身统计、轮数却是近期统计
 - `monitor.py`：自监控度量（工具调用/记忆召回/skill 使用按天统计），供未来可视化/告警接入
 
 **自动复盘流程**：
-1. 每轮对话结束追加一条 turn 记录到 `consolidate_state.jsonl`
-2. `/exit` 时检查是否满足自动条件 → 是则启动后台线程跑 `apply_unattended`
-3. `apply_unattended` 自动写入 lessons / memory_entries / episodes（低风险 ADD-only），小幅 human 更新也自动写；大幅更新与待审项暂存到 `consolidate_pending.jsonl`
-4. 用户下次进入 chat 运行 `/consolidate-review` 查看暂存草稿，再手动 `alfred consolidate` 逐项确认
+1. CLI 启动或成功轮次后尝试启动后台复盘；跨进程只允许一个队列工作线程。不在 `/exit` 时才启动。
+2. SQLite 冻结批次范围（最多 12 轮）并先保存模型草稿；所有自动效果处理完成后推进批次。失败记录在 `alfred audit`，手动续跑用 `alfred consolidate --queued`。
+3. 重试复用同批草稿；事实去重、教训按内容去重、情景用稳定 ID、待审按批号去重。事实引用需逐字匹配该批用户原话。
+4. 纠正以及相关 human 更新进入待审，通过 `/consolidate-review` 查看、`alfred consolidate --review` 确认。旧版 JSONL 待审文件保留。
+
+方案延续 [Sleep-time Compute](https://arxiv.org/abs/2504.13171) 与 [Rethinking Memory](https://arxiv.org/abs/2505.00675) 的离线整理和记忆更新分工；恢复与证据校验为本项目的工程约束。
 
 **主动行为入口**（让 Alfred 从"问答机"变"管家"）：
 - **deliver_due**：CLI 启动及等待输入前投递纯文本；投递中和失败状态可续投，成功输出后才标记 `fired`。不得把提醒注入 Agent 或重放工具。

@@ -63,5 +63,8 @@ def render_for_prompt(memories: list[dict]) -> str:
     lines = []
     for m in memories:
         text = m.get("memory") or m.get("text") or str(m)
+        metadata = m.get("metadata") or {}
+        if metadata.get("source_ref"):
+            text = f"{text}（来源轮次：{metadata['source_ref']}）"
         lines.append(f"- {text}")
     return "\n".join(lines)

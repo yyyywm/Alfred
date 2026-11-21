@@ -75,6 +75,13 @@ class LessonsBlock:
             entry += f"**场景**：{context}\n"
 
         current = self.read()
+        payload = entry.split("\n", 3)[3].rstrip()
+        if any(
+            section.split("\n", 1)[-1].strip() == payload
+            and section.startswith(f"[{category}] ")
+            for section in current.split("\n### ")[1:]
+        ):
+            return f"教训已存在：[{category}] {lesson[:40]}"
         new_content = current.rstrip() + entry
 
         if len(new_content) > self.max_chars:

@@ -240,6 +240,9 @@ def delete_session(config: Config, session_id: str) -> bool:
     f = config.path(config.paths.history_dir) / f"{safe_id}.jsonl"
     if not f.exists():
         return False
+    from .memory.review_queue import forget_session
+
+    forget_session(config, safe_id)
     f.unlink()
     with _meta_lock:
         meta = _load_meta(config)

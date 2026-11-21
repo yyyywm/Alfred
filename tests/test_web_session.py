@@ -301,6 +301,18 @@ class TestRunTurn:
             ws.run_turn("hi")
         assert seen.get("bus") is not None, "run_turn 必须把 bus 传给 chat_turn_stream"
 
+    def test_real_stream_enqueues_successful_web_turn(self, tmp_path):
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        from alfred.memory.review_queue import originals, status
+
+        ws = self._make_session(tmp_path)
+        ws.agent = Agent(TestModel(custom_output_text="收到"))
+        ws.run_turn("Web 原话")
+        assert status(ws.config)["pending"] == 1
+        assert originals(ws.config, "原话", session_id=ws.session.id)[0][1:] == ("Web 原话", "收到")
+
     def test_turn_error_not_duplicated_on_re_raise(self, tmp_path):
         """生成器发过 TurnError 事件后又抛异常时，不应重复上报 turn_error。"""
         ws = self._make_session(tmp_path)

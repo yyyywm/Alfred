@@ -103,6 +103,10 @@ def test_chat_turn_stream_emits_events(tmp_path):
     assert tool_ends[0].args == {"name": "Ada"}
     assert any(isinstance(e, TurnEnd) for e in events)
 
+    from alfred.memory.review_queue import originals, status
+
+    assert status(cfg)["pending"] == 1
+    assert originals(cfg, "say hi", session_id=session.id)[0][1] == "say hi"
     assert len(session.messages) == 2
     assert session.messages[1].role == "assistant"
     assert session.messages[1].tool_calls[0].tool_name == "greet"

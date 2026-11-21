@@ -295,7 +295,8 @@ def _is_dup_neighbor(text: str, neighbor: dict) -> bool:
     return score is not None and float(score) >= _DUP_VECTOR_THRESHOLD
 
 
-def add_fact(config: Config, text: str, user_id: str | None = None) -> dict:
+def add_fact(config: Config, text: str, user_id: str | None = None, *,
+             metadata: dict | None = None, exact_only: bool = False) -> dict:
     """写入一条事实型记忆，写入前做近重复去重。
 
     返回 {"status": "added"|"duplicate"|"offline", ...}：
@@ -310,10 +311,17 @@ def add_fact(config: Config, text: str, user_id: str | None = None) -> dict:
     try:
         neighbors = client.search(text, limit=_DUP_SEARCH_LIMIT, user_id=uid)
     except Exception:
+        if metadata or exact_only:
+            raise
         neighbors = []  # 检索失败不阻塞写入；mem0 内部推断兜底
     for m in neighbors:
-        if _is_dup_neighbor(text, m):
+        previous = m.get("memory") or m.get("text")
+        if previous == text or (not exact_only and _is_dup_neighbor(text, m)):
             return {"status": "duplicate",
                     "existing": m.get("memory") or m.get("text")}
-    client.add([{"role": "user", "content": text}], user_id=uid)
+    messages = [{"role": "user", "content": text}]
+    if metadata:
+        client.add(messages, user_id=uid, metadata=metadata)
+    else:
+        client.add(messages, user_id=uid)
     return {"status": "added"}

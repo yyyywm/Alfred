@@ -57,6 +57,7 @@ class MemoryAuditReport:
         self.stale_goals_count: int = 0
         self.schedules_count: int = 0
         self.reminders_needing_retry: int = 0
+        self.review_queue: dict = {}
 
         # 诊断
         self.diagnostics: list[str] = []
@@ -67,6 +68,7 @@ class MemoryAuditReport:
             "total_sessions": self.total_sessions,
             "total_messages": self.total_messages,
             "total_turns": self.total_turns,
+            "review_queue": self.review_queue,
             "memory": {
                 "count": self.memory_count,
                 "entries": self.memory_list[:20],
@@ -144,6 +146,9 @@ def audit(config, days: int = 90) -> MemoryAuditReport:
     from ..schedule import schedule_list as _schedule_list
 
     report = MemoryAuditReport()
+    from .review_queue import status
+
+    report.review_queue = status(config)
     now = time.time()
     cutoff = now - days * 86400 if days >= 0 else 0
 
@@ -352,6 +357,13 @@ def format_audit_human(report: MemoryAuditReport) -> str:
     lines.append(f"[bold]过期目标[/bold] {report.stale_goals_count} 个")
     if report.reminders_needing_retry:
         lines.append(f"[bold]待重投提醒[/bold] {report.reminders_needing_retry} 条")
+    if report.review_queue:
+        queue = report.review_queue
+        lines.append(f"[bold]待复盘[/bold] {queue['pending']} 轮")
+        if queue["batch"]:
+            lines.append(f"  未完成批次：{queue['batch']}")
+        if queue["error"]:
+            lines.append(f"  最近失败：{queue['error']}")
 
     if report.diagnostics:
         lines.append("")
